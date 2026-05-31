@@ -16,7 +16,7 @@ const STATUS_EVENT: &str = "device-status-changed";
 /// single probe maps through the same `ProbeOutcome -> DeviceStatus` path.
 #[tauri::command]
 fn get_device_status() -> DeviceStatus {
-    let mut m = Monitor::new(UsbProbe);
+    let mut m = Monitor::new(UsbProbe::new());
     m.tick().unwrap_or(DeviceStatus::Disconnected)
 }
 
@@ -27,7 +27,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             thread::spawn(move || {
-                let mut monitor = Monitor::new(UsbProbe);
+                let mut monitor = Monitor::new(UsbProbe::new());
                 loop {
                     if let Some(status) = monitor.tick() {
                         let _ = handle.emit(STATUS_EVENT, status);

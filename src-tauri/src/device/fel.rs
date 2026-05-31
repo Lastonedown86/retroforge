@@ -47,13 +47,15 @@ pub fn parse_version(buf: &[u8]) -> Result<SocInfo, RfError> {
 mod tests {
     use super::*;
 
-    /// Build a synthetic but structurally correct version response for R16.
+    /// Real 32-byte FEL version response captured from an NES Classic Mini
+    /// (Allwinner R16) over FEL. Signature "AWUSBFEX", soc_id 0x00166700.
     fn r16_response() -> Vec<u8> {
-        let mut b = vec![0u8; 32];
-        b[0..8].copy_from_slice(b"AWUSBFEX");
-        // soc_id 0x1667 stored as 0x00166700 little-endian at offset 8.
-        b[8..12].copy_from_slice(&0x0016_6700u32.to_le_bytes());
-        b
+        vec![
+            0x41, 0x57, 0x55, 0x53, 0x42, 0x46, 0x45, 0x58, // "AWUSBFEX"
+            0x00, 0x67, 0x16, 0x00, // soc_id (0x00166700 LE) -> 0x1667
+            0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x44, 0x08, 0x00, 0x7e, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]
     }
 
     #[test]

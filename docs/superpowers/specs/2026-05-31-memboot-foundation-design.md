@@ -22,10 +22,18 @@ later slice (NAND backup) will build on.
 
 - **Scope:** memboot foundation only. No NAND read/dump, no persistent write/restore, no
   authoring our own boot image.
-- **Payload:** bundle Hakchi's proven reference binaries (fes1 DRAM-init blob, U-Boot, and a
-  known-good boot.img) as the memboot payload. We build only the Rust FEL load+exec
-  mechanism; authoring a system image is slice 6 (per ADR-0002, "inherit a working boot
-  first").
+- **Payload sourcing:** the memboot payload is three blobs — `fes1` (DRAM init), `uboot.bin`,
+  and `boot.img`.
+  - `fes1.bin` is **bundled** in our repo (an Allwinner DRAM-init blob, ~14 KB; sourced from
+    `Hakchi2-CE/hakchi_gui/data/fes1.bin`).
+  - `uboot.bin` and `boot.img` are **fetched at runtime**: download Hakchi's public
+    `hakchi-latest.hmod` (a tar archive) from `https://hakchi.net/hakchi/hmods/hakchi-latest.hmod`,
+    extract `boot/uboot.bin` and `boot/boot.img`, and cache them locally (gitignored).
+  - Rationale: `boot.img` contains Nintendo's stock R16 kernel; committing it to our public
+    GPLv3 repo is a copyright problem, and `uboot.bin` is a GPLv2 binary we'd rather not
+    redistribute either. Runtime-fetch keeps both out of our source and mirrors exactly how
+    Hakchi obtains them. We build only the Rust FEL load+exec mechanism; authoring a system
+    image is slice 6 (per ADR-0002, "inherit a working boot first").
 - **Success signal:** after exec, the FEL USB device (`1F3A:EFE8`) disappearing within a
   timeout is the programmatic success signal; the user confirms the actual boot visually on
   the TV. Detecting the booted system over USB is out of scope (couples to image internals).
@@ -71,13 +79,17 @@ src-tauri/src/device/
   memboot.rs    NEW. Orchestration over a FelOps trait. write_memory / read_memory / exec,
                 init_dram, run_uboot_cmd, and memboot(). The "init DRAM before any DRAM-range
                 write" rule lives here.
-  blobs.rs      NEW. Bundled reference binaries embedded with include_bytes!: fes1, U-Boot,
-                boot.img. Accessors return &'static [u8] and surface BlobMissing if a blob is
-                absent at build time.
+  blobs.rs      NEW. fes1 embedded with include_bytes! (returns &'static [u8]). Also the
+                accessor layer that resolves uboot.bin + boot.img from the local hmod cache
+                (see hmod.rs), surfacing BlobMissing if they are not yet available.
+  hmod.rs       NEW. Fetches hakchi-latest.hmod (download + cache to a gitignored app-data
+                path), extracts boot/uboot.bin and boot/boot.img from the tar, and exposes
+                them as byte buffers. Re-download only if the cache is absent.
   mod.rs        Re-exports; unchanged status model.
 error.rs        New RfError variants: MemoryWriteFailed, ExecFailed, BlobMissing,
-                MembootTimeout.
-lib.rs          New memboot() command + memboot-progress event; worker thread.
+                MembootTimeout, HmodFetchFailed, HmodExtractFailed.
+lib.rs          New memboot() command + memboot-progress event; worker thread. An
+                ensure_blobs step fetches/caches the hmod before the FEL sequence.
 ```
 
 ## Components and boundaries
@@ -109,11 +121,21 @@ Orchestration functions are written against `FelOps` so they are testable withou
   `transfer_base_m`. The orchestration owns DRAM-init ordering; `write_memory` does **not**
   auto-init DRAM (unlike the reference's `WriteMemory`), so init happens exactly once.
 
+### `blobs.rs` + `hmod.rs` — payload provisioning
+`hmod.rs` owns acquiring the runtime blobs: download `hakchi-latest.hmod` to a gitignored
+app-data cache path (only if not already cached), open the archive, and extract
+`boot/uboot.bin` and `boot/boot.img`. `blobs.rs` is the unified accessor: `fes1()` returns
+the embedded blob; `uboot()` and `boot_img()` return the cached extractions, or
+`BlobMissing` if `ensure_blobs` has not run. Archive handling uses a Rust tar/compression
+crate; the extraction (locate an entry by path, read its bytes) is unit-testable against a
+small synthetic archive fixture.
+
 ### `lib.rs` — command + event
-`memboot()` Tauri command spawns a worker thread (the sequence is multi-step and slow),
-emits `memboot-progress` events (one per step: dram-init, load-image, load-uboot, exec,
-waiting-for-fel-exit), then polls for the FEL device to disappear within a timeout. Emits a
-terminal success or failure.
+`memboot()` Tauri command spawns a worker thread (the sequence is multi-step and slow). It
+first runs `ensure_blobs` (fetch + cache the hmod, extract uboot/boot.img) — emitting a
+`fetching-payload` progress step — then emits one event per FEL step (dram-init, load-image,
+load-uboot, exec, waiting-for-fel-exit), then polls for the FEL device to disappear within a
+timeout. Emits a terminal success or failure.
 
 ### UI
 A "Memboot (test)" button and a step/status readout placed near the existing status panel.
@@ -121,19 +143,24 @@ Disabled unless the panel shows Connected. (The proper Advanced surface is a lat
 
 ## Data flow
 
-User clicks Memboot → command spawns worker → open `FelTransport` → `init_dram` → write
-`boot.img` to transfer base → write + patch U-Boot → `exec` boota → poll for `1F3A:EFE8` to
-vanish within the timeout → emit `Success` (programmatic) → user confirms the console booted
-on the TV. Each step emits a progress event so the UI shows where it is.
+User clicks Memboot → command spawns worker → `ensure_blobs` (download + cache
+hakchi-latest.hmod, extract uboot.bin + boot.img; skipped if already cached) → open
+`FelTransport` → `init_dram` → write `boot.img` to transfer base → write + patch U-Boot →
+`exec` boota → poll for `1F3A:EFE8` to vanish within the timeout → emit `Success`
+(programmatic) → user confirms the console booted on the TV. Each step emits a progress
+event so the UI shows where it is.
 
 ## Error handling and safety
 
 Memboot performs **no NAND write** — it is RAM-only and non-persistent, so there is no brick
 path in this slice. Every FEL step returns `Result`. New `RfError` variants:
-`MemoryWriteFailed`, `ExecFailed`, `BlobMissing`, `MembootTimeout`. A bad or mismatched blob
-hangs the device: the FEL device never disappears, the poll times out, and the UI reports
-failure with recovery guidance ("unplug and replug while holding RESET to return to FEL").
-No panics cross the Tauri boundary.
+`MemoryWriteFailed`, `ExecFailed`, `BlobMissing`, `MembootTimeout`, `HmodFetchFailed`,
+`HmodExtractFailed`. The payload fetch can fail (offline, server down, corrupt archive) —
+that surfaces as `HmodFetchFailed`/`HmodExtractFailed` with a clear message before any FEL
+action, leaving the device untouched. A bad or mismatched blob hangs the device: the FEL
+device never disappears, the poll times out, and the UI reports failure with recovery
+guidance ("unplug and replug while holding RESET to return to FEL"). No panics cross the
+Tauri boundary.
 
 ## Testing
 
@@ -143,6 +170,9 @@ No panics cross the Tauri boundary.
   - `memboot.rs` orchestration via a mock `FelOps`: assert the emitted call sequence —
     DRAM init happens before any DRAM-range write, addresses match the memory map, the
     U-Boot command is patched at the correct offset, and `boota`/exec is issued last.
+  - `hmod.rs` extraction: against a small synthetic tar fixture containing `boot/uboot.bin`
+    and `boot/boot.img`, assert the correct entry bytes are returned and a missing entry
+    yields `HmodExtractFailed`. (The network download itself is not unit-tested.)
 - **Hardware acceptance (manual, the real gate):** a documented checklist — run Memboot
   against the device, confirm the FEL device disappears within the timeout AND the console
   visibly boots the loaded image on the TV. Captures any address/blob corrections from the
@@ -157,13 +187,16 @@ No panics cross the Tauri boundary.
 
 ## Open items (resolved during plan/implementation)
 
-- **Blob sourcing.** `fes1.bin` is present at `Hakchi2-CE/hakchi_gui/data/fes1.bin`. The
-  **U-Boot binary** and a **boot.img** are not in the reference repo by name (Hakchi fetches
-  or builds them) — they must be located in the reference or sourced as known-good binaries
-  before the hardware test. This gates the hardware run, not the code, which is testable
-  against the mock `FelOps`.
+- **Blob sourcing — RESOLVED in approach, details in plan.** `fes1.bin` is bundled (copied
+  from `Hakchi2-CE/hakchi_gui/data/fes1.bin`). `uboot.bin` + `boot.img` are fetched at
+  runtime from `https://hakchi.net/hakchi/hmods/hakchi-latest.hmod` and extracted from the
+  tar (entries `boot/uboot.bin`, `boot/boot.img`). The plan must pin the exact archive
+  compression (the hmod is opened generically by Hakchi via SharpCompress, then read as a
+  tar — confirm whether it is gzip/xz/plain tar and pick the matching Rust crate).
 - **U-Boot command marker.** `run_uboot_cmd` depends on a known marker offset inside the
-  specific Hakchi U-Boot build where the command string is patched. The exact marker/format
-  must be read from the reference and confirmed against the sourced U-Boot binary.
+  Hakchi U-Boot build where the command string is patched (Hakchi finds it by scanning for a
+  prefix; the SD variant also swaps the last 8 bytes — see `hakchi.cs` `Uboot()`). The exact
+  marker/prefix and the SD-vs-normal handling must be read from the reference and confirmed
+  against the extracted `uboot.bin`. For this slice, target the "normal" (non-SD) U-Boot.
 - **boota argument form.** The exact `boota`/boot command string and address argument are
-  confirmed from the reference during implementation.
+  confirmed from the reference (`Fel.cs` memboot path) during implementation.

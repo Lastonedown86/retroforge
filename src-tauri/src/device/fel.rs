@@ -24,7 +24,11 @@ pub const UBOOT_BASE: u32 = DRAM_BASE + 0x0700_0000; // 0x4700_0000
 pub const TRANSFER_BASE: u32 = DRAM_BASE + 0x0740_0000; // 0x4740_0000
 pub const SECTOR_SIZE: usize = 0x2_0000;
 pub const TRANSFER_MAX_SIZE: u32 = (SECTOR_SIZE as u32) * 0x100; // 0x200_0000
-pub const MAX_BULK: usize = 0x1_0000; // per-transfer chunk size
+
+/// Per-transfer chunk size. Kept at 4 KB: a single large bulk-OUT (e.g. 64 KB)
+/// to the device stalls under the Windows WinUSB backend, so memory writes are
+/// chunked small. Hardware-verified — larger values hang the DRAM image upload.
+pub const MAX_BULK: usize = 0x1000;
 
 /// Build the 32-byte AWUC USB request envelope.
 pub fn aw_usb_request(req: u16, len: u32) -> [u8; 32] {

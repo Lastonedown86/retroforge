@@ -53,7 +53,9 @@ pub fn read_memory<T: FelIo>(io: &mut T, addr: u32, len: u32) -> Result<Vec<u8>,
         out.extend_from_slice(&io.fel_read(l as usize)?);
         let status = io.fel_read(8)?;
         if !status_ok(&status) {
-            return Err(RfError::MemoryReadFailed(format!("bad status at {addr:#x}")));
+            return Err(RfError::MemoryReadFailed(format!(
+                "bad status at {addr:#x}"
+            )));
         }
         remaining -= l;
         addr += l;
@@ -159,7 +161,8 @@ mod tests {
     #[test]
     fn write_memory_chunks_above_max_bulk() {
         let mut io = MockFelIo::new();
-        let data = vec![0u8; fel::MAX_BULK + 0x8000]; // 1.5 chunks
+        // One full chunk + a small remainder => exactly two chunks, for any MAX_BULK.
+        let data = vec![0u8; fel::MAX_BULK + 0x40];
         write_memory(&mut io, fel::TRANSFER_BASE, &data).unwrap();
         // chunk1 msg+data, chunk2 msg+data = 4 writes.
         assert_eq!(io.writes.len(), 4);
@@ -238,10 +241,11 @@ mod tests {
         // First op is DRAM init: download to FES1_BASE.
         assert_eq!(&io.writes[0][4..8], &fel::FES1_BASE.to_le_bytes());
         // The boot image is staged at TRANSFER_BASE somewhere in the sequence.
-        let staged = io
-            .writes
-            .iter()
-            .any(|w| w.len() >= 8 && w[0..4] == [0x01, 0x01, 0x00, 0x00] && w[4..8] == fel::TRANSFER_BASE.to_le_bytes());
+        let staged = io.writes.iter().any(|w| {
+            w.len() >= 8
+                && w[0..4] == [0x01, 0x01, 0x00, 0x00]
+                && w[4..8] == fel::TRANSFER_BASE.to_le_bytes()
+        });
         assert!(staged, "boot image must be written to TRANSFER_BASE");
         // The final write is the FEL_RUN of U-Boot.
         let last = io.writes.last().unwrap();

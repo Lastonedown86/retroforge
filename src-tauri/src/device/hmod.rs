@@ -77,7 +77,9 @@ pub fn extract_entry(archive: &[u8], name: &str) -> Result<Vec<u8>, RfError> {
             return Ok(out);
         }
     }
-    Err(RfError::HmodExtractFailed(format!("entry not found: {name}")))
+    Err(RfError::HmodExtractFailed(format!(
+        "entry not found: {name}"
+    )))
 }
 
 #[cfg(test)]
@@ -86,7 +88,10 @@ mod tests {
 
     fn make_tar() -> Vec<u8> {
         let mut builder = tar::Builder::new(Vec::new());
-        for (name, data) in [("boot/uboot.bin", b"UBOOT" as &[u8]), ("boot/boot.img", b"IMG")] {
+        for (name, data) in [
+            ("boot/uboot.bin", b"UBOOT" as &[u8]),
+            ("boot/boot.img", b"IMG"),
+        ] {
             let mut header = tar::Header::new_gnu();
             header.set_size(data.len() as u64);
             header.set_cksum();

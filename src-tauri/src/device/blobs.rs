@@ -20,9 +20,8 @@ pub fn ensure_blobs(cache_dir: &Path) -> Result<(), RfError> {
 
 fn read_hmod(cache_dir: &Path) -> Result<Vec<u8>, RfError> {
     let path = hmod::cache_path(cache_dir);
-    fs::read(&path).map_err(|_| {
-        RfError::BlobMissing("hmod not cached; run ensure_blobs first".into())
-    })
+    fs::read(&path)
+        .map_err(|_| RfError::BlobMissing("hmod not cached; run ensure_blobs first".into()))
 }
 
 /// The U-Boot binary extracted from the cached hmod.

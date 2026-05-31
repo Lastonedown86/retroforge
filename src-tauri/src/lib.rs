@@ -1,12 +1,17 @@
 mod device;
 mod error;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use rusb::UsbContext;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
+
+/// Set while a memboot is in progress so the background poll thread does not
+/// open/claim the FEL interface and disturb memboot's bulk transfers.
+static MEMBOOT_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 use crate::device::usb::{is_fel_device, FelTransport, UsbProbe};
 use crate::device::{blobs, fel, memboot as memboot_ops};
@@ -67,6 +72,19 @@ fn open_fel() -> Result<FelTransport, RfError> {
     Err(RfError::DeviceGone)
 }
 
+/// Hakchi's "SD" U-Boot transform: swap the two 4-byte words in the trailing
+/// 8 bytes. Selects booting the RAM-staged image instead of NAND.
+fn to_sd_uboot(uboot: &[u8]) -> Vec<u8> {
+    let mut v = uboot.to_vec();
+    let n = v.len();
+    if n >= 8 {
+        let last8: Vec<u8> = v[n - 8..].to_vec();
+        v[n - 8..n - 4].copy_from_slice(&last8[4..8]);
+        v[n - 4..n].copy_from_slice(&last8[0..4]);
+    }
+    v
+}
+
 fn run_memboot(app: &AppHandle, cache_dir: std::path::PathBuf) -> Result<(), RfError> {
     emit_progress(app, MembootProgress::FetchingPayload);
     blobs::ensure_blobs(&cache_dir)?;
@@ -79,6 +97,11 @@ fn run_memboot(app: &AppHandle, cache_dir: std::path::PathBuf) -> Result<(), RfE
 
     emit_progress(app, MembootProgress::InitDram);
     memboot_ops::init_dram(&mut transport, fes1)?;
+    // The DRAM controller needs time to come up after fes1 runs before we can
+    // write to DRAM addresses; the reference (Hakchi InitDram) sleeps 2s here.
+    // Without it the first DRAM bulk write hits uninitialized memory and stalls.
+    thread::sleep(Duration::from_millis(2000));
+
     emit_progress(app, MembootProgress::LoadingImage);
     {
         let padded = boot_img.len().div_ceil(fel::SECTOR_SIZE) * fel::SECTOR_SIZE;
@@ -91,8 +114,12 @@ fn run_memboot(app: &AppHandle, cache_dir: std::path::PathBuf) -> Result<(), RfE
     }
     emit_progress(app, MembootProgress::LoadingUboot);
     emit_progress(app, MembootProgress::Executing);
+    // Hakchi memboots with the "SD" U-Boot variant: the last two 4-byte words
+    // are swapped (a boot-source flag). The raw/"normal" U-Boot boots from NAND;
+    // the SD variant boota's the image we staged in RAM.
+    let uboot_sd = to_sd_uboot(&uboot);
     let cmd = format!("boota {:x}", fel::TRANSFER_BASE);
-    memboot_ops::run_uboot_cmd(&mut transport, &uboot, &cmd)?;
+    memboot_ops::run_uboot_cmd(&mut transport, &uboot_sd, &cmd)?;
 
     // Success = the FEL device leaves the bus (it is now running the image).
     drop(transport);
@@ -114,7 +141,11 @@ fn memboot(app: AppHandle) {
         .app_cache_dir()
         .unwrap_or_else(|_| std::env::temp_dir());
     std::thread::spawn(move || {
+        // Hold off the poll thread for the duration so it does not contend for
+        // the USB interface mid-transfer. Reset on every exit path.
+        MEMBOOT_ACTIVE.store(true, Ordering::SeqCst);
         let result = run_memboot(&app, cache_dir);
+        MEMBOOT_ACTIVE.store(false, Ordering::SeqCst);
         match result {
             Ok(()) => emit_progress(&app, MembootProgress::Success),
             Err(e) => emit_progress(
@@ -144,8 +175,11 @@ pub fn run() {
             thread::spawn(move || {
                 let mut monitor = Monitor::new(UsbProbe::new());
                 loop {
-                    if let Some(status) = monitor.tick() {
-                        let _ = handle.emit(STATUS_EVENT, status);
+                    // Skip probing while a memboot holds the interface.
+                    if !MEMBOOT_ACTIVE.load(Ordering::SeqCst) {
+                        if let Some(status) = monitor.tick() {
+                            let _ = handle.emit(STATUS_EVENT, status);
+                        }
                     }
                     thread::sleep(Duration::from_millis(1000));
                 }

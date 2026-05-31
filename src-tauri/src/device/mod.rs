@@ -1,3 +1,4 @@
+pub mod blobs;
 pub mod fel;
 pub mod memboot;
 pub mod usb;

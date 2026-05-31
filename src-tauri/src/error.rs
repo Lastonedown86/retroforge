@@ -25,6 +25,8 @@ pub enum RfError {
     HmodFetchFailed(String),
     #[error("failed to extract from hmod: {0}")]
     HmodExtractFailed(String),
+    #[error("kernel cmdline has no room for the injected token")]
+    CmdlineTooLong,
 }
 
 #[cfg(test)]

@@ -9,9 +9,9 @@ use rusb::UsbContext;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Set while a memboot is in progress so the background poll thread does not
-/// open/claim the FEL interface and disturb memboot's bulk transfers.
-static MEMBOOT_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Set while a privileged device operation (memboot, shell) holds the USB
+/// interface, so the background poll thread does not contend for it.
+static DEVICE_BUSY: AtomicBool = AtomicBool::new(false);
 
 use crate::device::usb::{is_fel_device, FelTransport, UsbProbe};
 use crate::device::{blobs, fel, memboot as memboot_ops};
@@ -143,9 +143,9 @@ fn memboot(app: AppHandle) {
     std::thread::spawn(move || {
         // Hold off the poll thread for the duration so it does not contend for
         // the USB interface mid-transfer. Reset on every exit path.
-        MEMBOOT_ACTIVE.store(true, Ordering::SeqCst);
+        DEVICE_BUSY.store(true, Ordering::SeqCst);
         let result = run_memboot(&app, cache_dir);
-        MEMBOOT_ACTIVE.store(false, Ordering::SeqCst);
+        DEVICE_BUSY.store(false, Ordering::SeqCst);
         match result {
             Ok(()) => emit_progress(&app, MembootProgress::Success),
             Err(e) => emit_progress(
@@ -176,7 +176,7 @@ pub fn run() {
                 let mut monitor = Monitor::new(UsbProbe::new());
                 loop {
                     // Skip probing while a memboot holds the interface.
-                    if !MEMBOOT_ACTIVE.load(Ordering::SeqCst) {
+                    if !DEVICE_BUSY.load(Ordering::SeqCst) {
                         if let Some(status) = monitor.tick() {
                             let _ = handle.emit(STATUS_EVENT, status);
                         }

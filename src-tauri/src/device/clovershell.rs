@@ -10,6 +10,7 @@ pub const CMD_PING: u8 = 0;
 pub const CMD_PONG: u8 = 1;
 pub const CMD_SHELL_KILL_ALL: u8 = 8;
 pub const CMD_EXEC_NEW_REQ: u8 = 9;
+#[allow(dead_code)] // protocol constant (exec-new response id); matched by device, not by us
 pub const CMD_EXEC_NEW_RESP: u8 = 10;
 pub const CMD_EXEC_STDOUT: u8 = 13;
 pub const CMD_EXEC_STDERR: u8 = 14;

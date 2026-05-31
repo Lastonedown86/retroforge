@@ -13,6 +13,8 @@ use tauri::{AppHandle, Emitter, Manager};
 /// interface, so the background poll thread does not contend for it.
 static DEVICE_BUSY: AtomicBool = AtomicBool::new(false);
 
+use crate::device::bootimg;
+use crate::device::clovershell::{self, ClovershellTransport};
 use crate::device::usb::{is_fel_device, FelTransport, UsbProbe};
 use crate::device::{blobs, fel, memboot as memboot_ops};
 use crate::device::{DeviceStatus, Monitor};
@@ -158,6 +160,97 @@ fn memboot(app: AppHandle) {
     });
 }
 
+const SHELL_PROGRESS_EVENT: &str = "shell-progress";
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "phase", rename_all = "camelCase")]
+enum ShellProgress {
+    FetchingPayload,
+    Membooting,
+    WaitingForShell,
+    Running,
+    Done { stdout: String, exit_code: i32 },
+    Failed { message: String },
+}
+
+fn emit_shell(app: &AppHandle, p: ShellProgress) {
+    let _ = app.emit(SHELL_PROGRESS_EVENT, p);
+}
+
+/// Memboot with the clovershell cmdline, then connect + ping + exec the command.
+fn run_shell(app: &AppHandle, cache_dir: std::path::PathBuf, command: &str) -> Result<(), RfError> {
+    emit_shell(app, ShellProgress::FetchingPayload);
+    blobs::ensure_blobs(&cache_dir)?;
+    let fes1 = blobs::fes1();
+    let uboot = to_sd_uboot(&blobs::uboot(&cache_dir)?);
+    let boot_img = bootimg::inject_cmdline(&blobs::boot_img(&cache_dir)?, "hakchi-clovershell")?;
+
+    emit_shell(app, ShellProgress::Membooting);
+    {
+        let mut transport = open_fel()?;
+        memboot_ops::init_dram(&mut transport, fes1)?;
+        thread::sleep(Duration::from_millis(2000));
+        let padded = boot_img.len().div_ceil(fel::SECTOR_SIZE) * fel::SECTOR_SIZE;
+        if padded as u32 > fel::TRANSFER_MAX_SIZE {
+            return Err(RfError::ExecFailed("boot image too large".into()));
+        }
+        let mut kernel = boot_img.clone();
+        kernel.resize(padded, 0);
+        memboot_ops::write_memory(&mut transport, fel::TRANSFER_BASE, &kernel)?;
+        let cmd = format!("boota {:x}", fel::TRANSFER_BASE);
+        memboot_ops::run_uboot_cmd(&mut transport, &uboot, &cmd)?;
+    }
+
+    emit_shell(app, ShellProgress::WaitingForShell);
+    let mut transport = wait_for_clovershell(Duration::from_secs(30))?;
+
+    emit_shell(app, ShellProgress::Running);
+    let out = clovershell::exec(&mut transport, command)?;
+    emit_shell(
+        app,
+        ShellProgress::Done {
+            stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+            exit_code: out.exit_code,
+        },
+    );
+    Ok(())
+}
+
+/// Poll until a clovershell device answers ping, or the deadline passes.
+fn wait_for_clovershell(within: Duration) -> Result<ClovershellTransport, RfError> {
+    let deadline = Instant::now() + within;
+    while Instant::now() < deadline {
+        if let Ok(mut t) = ClovershellTransport::open() {
+            if clovershell::ping(&mut t).is_ok() {
+                return Ok(t);
+            }
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+    Err(RfError::ShellNotFound)
+}
+
+#[tauri::command]
+fn open_shell_and_run(app: AppHandle, command: String) {
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    std::thread::spawn(move || {
+        DEVICE_BUSY.store(true, Ordering::SeqCst);
+        let result = run_shell(&app, cache_dir, &command);
+        DEVICE_BUSY.store(false, Ordering::SeqCst);
+        if let Err(e) = result {
+            emit_shell(
+                &app,
+                ShellProgress::Failed {
+                    message: e.to_string(),
+                },
+            );
+        }
+    });
+}
+
 /// One-shot status read for initial render. Builds a throwaway Monitor so a
 /// single probe maps through the same `ProbeOutcome -> DeviceStatus` path.
 #[tauri::command]
@@ -169,7 +262,7 @@ fn get_device_status() -> DeviceStatus {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_device_status, memboot])
+        .invoke_handler(tauri::generate_handler![get_device_status, memboot, open_shell_and_run])
         .setup(|app| {
             let handle = app.handle().clone();
             thread::spawn(move || {

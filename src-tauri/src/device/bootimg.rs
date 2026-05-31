@@ -9,7 +9,6 @@ const MAGIC: &[u8; 8] = b"ANDROID!";
 /// Append ` {token}` to the kernel command line of an Android boot image,
 /// returning a modified copy. Errors if the image is malformed or the cmdline
 /// field has no room.
-#[allow(dead_code)] // consumed by the shell command in a later task
 pub fn inject_cmdline(boot_img: &[u8], token: &str) -> Result<Vec<u8>, RfError> {
     if boot_img.len() < CMDLINE_OFFSET + CMDLINE_SIZE {
         return Err(RfError::ExecFailed(

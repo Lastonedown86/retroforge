@@ -122,26 +122,6 @@ fn bulk_endpoints<T: UsbContext>(device: &rusb::Device<T>) -> Result<(u8, u8), R
     Ok((ep_in, ep_out))
 }
 
-/// Build the 32-byte AWUC request envelope.
-fn aw_usb_request(req: u16, len: u32) -> [u8; 32] {
-    let mut b = [0u8; 32];
-    b[0..4].copy_from_slice(b"AWUC");
-    b[8..12].copy_from_slice(&len.to_le_bytes());
-    b[12..16].copy_from_slice(&0x0c00_0000u32.to_le_bytes());
-    b[16..18].copy_from_slice(&req.to_le_bytes());
-    b[18..22].copy_from_slice(&len.to_le_bytes());
-    b
-}
-
-/// Build the 16-byte FEL request.
-fn fel_request(request: u32, address: u32, length: u32) -> [u8; 16] {
-    let mut b = [0u8; 16];
-    b[0..4].copy_from_slice(&request.to_le_bytes());
-    b[4..8].copy_from_slice(&address.to_le_bytes());
-    b[8..12].copy_from_slice(&length.to_le_bytes());
-    b
-}
-
 fn handshake<T: UsbContext>(device: &rusb::Device<T>) -> Result<SocInfo, RfError> {
     let handle = device
         .open()
@@ -180,14 +160,14 @@ fn handshake<T: UsbContext>(device: &rusb::Device<T>) -> Result<SocInfo, RfError
 
     // 1. FelWrite(FEL_VERIFY_DEVICE): AWUC WRITE envelope + 16-byte request,
     //    then the 13-byte AWUS acknowledgement.
-    let fel_req = fel_request(AW_FEL_VERSION, 0, 0);
-    w(&aw_usb_request(AW_USB_WRITE, fel_req.len() as u32))?;
+    let fel_req = fel::fel_request(AW_FEL_VERSION, 0, 0);
+    w(&fel::aw_usb_request(AW_USB_WRITE, fel_req.len() as u32))?;
     w(&fel_req)?;
     let mut status = [0u8; 13];
     read_full(&mut status)?;
 
     // 2. FelRead(32): AWUC READ envelope + 32-byte version payload + AWUS ack.
-    w(&aw_usb_request(AW_USB_READ, 32))?;
+    w(&fel::aw_usb_request(AW_USB_READ, 32))?;
     let mut version = [0u8; 32];
     read_full(&mut version)?;
     read_full(&mut status)?;
@@ -195,7 +175,7 @@ fn handshake<T: UsbContext>(device: &rusb::Device<T>) -> Result<SocInfo, RfError
     // 3. FelRead(8): drain the trailing FEL status. The reference VerifyDevice
     //    issues this second read; omitting it leaves bytes in the bulk pipe and
     //    desyncs the endpoint, so a later exchange reads stale/zero data.
-    w(&aw_usb_request(AW_USB_READ, 8))?;
+    w(&fel::aw_usb_request(AW_USB_READ, 8))?;
     let mut fel_status = [0u8; 8];
     read_full(&mut fel_status)?;
     read_full(&mut status)?;

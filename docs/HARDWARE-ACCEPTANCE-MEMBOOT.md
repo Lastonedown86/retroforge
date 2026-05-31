@@ -3,6 +3,20 @@
 Verifies memboot against a real NES Classic Mini. Memboot is RAM-only; a failure
 just hangs the device (recover by unplug → hold RESET → replug into FEL).
 
+## Result — 2026-05-31: PASS
+
+Verified against a real NES Classic Mini: clicking "Memboot (test)" fetched the
+hmod, staged the boot image over FEL, and the console booted the image (Hakchi
+appeared on the TV; the RAM-only image reboots afterwards, as expected).
+
+Four issues found and fixed during bring-up (see commit "fix(core): make memboot
+work on real hardware"):
+- Large bulk-OUT transfers stall on Windows WinUSB — memory writes chunk at 4 KB.
+- DRAM needs a ~2s settle after fes1 exec before it accepts writes.
+- U-Boot must be the "SD" variant (trailing two 4-byte words swapped) to boota the
+  RAM-staged image rather than booting from NAND.
+- The device-poll thread must be gated off during memboot to avoid USB contention.
+
 ## Prepare
 1. Device in FEL mode (hold RESET, plug USB, release), WinUSB bound, panel green
    "Connected — Allwinner R16" (see HARDWARE-ACCEPTANCE.md).

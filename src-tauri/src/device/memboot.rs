@@ -1,7 +1,3 @@
-// Public memboot API is wired into the Tauri command in a later task; allow
-// dead_code until then. (Removed when lib.rs consumes it.)
-#![allow(dead_code)]
-
 use crate::device::fel;
 use crate::error::RfError;
 
@@ -45,6 +41,7 @@ pub fn write_memory<T: FelIo>(io: &mut T, addr: u32, data: &[u8]) -> Result<(), 
 }
 
 /// Read `len` bytes from device memory at `addr` (4-byte padded), chunked.
+#[allow(dead_code)] // reserved for slice 3 (NAND backup); not yet called by production
 pub fn read_memory<T: FelIo>(io: &mut T, addr: u32, len: u32) -> Result<Vec<u8>, RfError> {
     let len = (len + 3) & !3;
     let mut out = Vec::with_capacity(len as usize);
@@ -91,6 +88,9 @@ pub fn run_uboot_cmd<T: FelIo>(io: &mut T, uboot: &[u8], cmd: &str) -> Result<()
 }
 
 /// Full memboot: init DRAM, stage the boot image, then boota it via U-Boot.
+/// This orchestration fn is the unit-tested reference path; the Tauri command
+/// calls the individual steps to emit progress events between them.
+#[allow(dead_code)] // unit-tested reference path; Tauri command calls steps individually
 pub fn memboot<T: FelIo>(
     io: &mut T,
     fes1: &[u8],

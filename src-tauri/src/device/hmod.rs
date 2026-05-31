@@ -8,14 +8,12 @@ pub const HMOD_URL: &str = "https://hakchi.net/hakchi/hmods/hakchi-latest.hmod";
 pub const HMOD_FILENAME: &str = "hakchi-latest.hmod";
 
 /// Path to the cached hmod inside `cache_dir`.
-#[allow(dead_code)] // consumed by blobs/lib in a later task
 pub fn cache_path(cache_dir: &Path) -> PathBuf {
     cache_dir.join(HMOD_FILENAME)
 }
 
 /// Ensure the hmod is cached locally, downloading it once if absent. Returns the
 /// cached file path.
-#[allow(dead_code)] // consumed by blobs/lib in a later task
 pub fn ensure_hmod(cache_dir: &Path) -> Result<PathBuf, RfError> {
     let path = cache_path(cache_dir);
     if path.exists() {
@@ -27,7 +25,6 @@ pub fn ensure_hmod(cache_dir: &Path) -> Result<PathBuf, RfError> {
     Ok(path)
 }
 
-#[allow(dead_code)] // consumed by blobs/lib in a later task
 fn download(url: &str) -> Result<Vec<u8>, RfError> {
     let resp = ureq::get(url)
         .call()
@@ -41,7 +38,6 @@ fn download(url: &str) -> Result<Vec<u8>, RfError> {
 
 /// Extract a single entry (by path, e.g. "boot/uboot.bin") from an hmod archive.
 /// Handles a gzip-compressed tar or a plain tar (sniffed by magic).
-#[allow(dead_code)] // consumed by blobs/lib in a later task
 pub fn extract_entry(archive: &[u8], name: &str) -> Result<Vec<u8>, RfError> {
     let tar_bytes = if archive.starts_with(&[0x1f, 0x8b]) {
         let mut d = flate2::read::GzDecoder::new(archive);

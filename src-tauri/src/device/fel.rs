@@ -13,29 +13,17 @@ pub const FEL_EP_OUT: u8 = 0x01;
 pub const FEL_EP_IN: u8 = 0x82;
 
 // FEL request types (AWFELStandardRequest).
-// Forward-declared for memboot (slice 2+); used in tests.
-#[allow(dead_code)]
 pub const FEL_DOWNLOAD: u32 = 0x101; // write data to device memory
-#[allow(dead_code)]
 pub const FEL_RUN: u32 = 0x102; // execute code at address
-#[allow(dead_code)]
 pub const FEL_UPLOAD: u32 = 0x103; // read data from device memory
 
 // Memboot memory map (Allwinner R16 / Hakchi reference).
-// These are forward-declared for the memboot implementation (slice 2+).
-#[allow(dead_code)]
 pub const FES1_BASE: u32 = 0x2000; // SRAM: DRAM-init blob load+exec address
-#[allow(dead_code)]
 pub const DRAM_BASE: u32 = 0x4000_0000;
-#[allow(dead_code)]
 pub const UBOOT_BASE: u32 = DRAM_BASE + 0x0700_0000; // 0x4700_0000
-#[allow(dead_code)]
 pub const TRANSFER_BASE: u32 = DRAM_BASE + 0x0740_0000; // 0x4740_0000
-#[allow(dead_code)]
 pub const SECTOR_SIZE: usize = 0x2_0000;
-#[allow(dead_code)]
 pub const TRANSFER_MAX_SIZE: u32 = (SECTOR_SIZE as u32) * 0x100; // 0x200_0000
-#[allow(dead_code)]
 pub const MAX_BULK: usize = 0x1_0000; // per-transfer chunk size
 
 /// Build the 32-byte AWUC USB request envelope.

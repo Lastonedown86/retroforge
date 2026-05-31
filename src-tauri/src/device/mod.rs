@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod fel;
 pub mod usb;
 
@@ -68,6 +66,7 @@ impl<P: DeviceProbe> Monitor<P> {
     }
 
     /// The most recently observed status (Disconnected if never ticked).
+    #[allow(dead_code)] // reserved for slice 2 (memboot/NAND); not yet called
     pub fn current(&self) -> DeviceStatus {
         self.last.clone().unwrap_or(DeviceStatus::Disconnected)
     }

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde::Serialize;
 use thiserror::Error;
 
@@ -12,6 +10,7 @@ pub enum RfError {
     #[error("FEL protocol error: {0}")]
     FelProtocolError(String),
     #[error("device disconnected during operation")]
+    #[allow(dead_code)] // reserved for slice 2 (memboot/NAND); not yet constructed
     DeviceGone,
 }
 

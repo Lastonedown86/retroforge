@@ -33,7 +33,9 @@ impl DeviceProbe for UsbProbe {
 
 fn probe_once() -> Result<ProbeOutcome, RfError> {
     let ctx = rusb::Context::new().map_err(|e| RfError::FelProtocolError(e.to_string()))?;
-    let devices = ctx.devices().map_err(|e| RfError::FelProtocolError(e.to_string()))?;
+    let devices = ctx
+        .devices()
+        .map_err(|e| RfError::FelProtocolError(e.to_string()))?;
 
     for device in devices.iter() {
         let desc = match device.device_descriptor() {

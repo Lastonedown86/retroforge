@@ -91,7 +91,10 @@ mod tests {
 
     #[test]
     fn emits_only_on_transition() {
-        let soc = SocInfo { soc_id: 0x1667, name: "Allwinner R16".into() };
+        let soc = SocInfo {
+            soc_id: 0x1667,
+            name: "Allwinner R16".into(),
+        };
         let probe = ScriptedProbe {
             script: vec![
                 ProbeOutcome::Absent,

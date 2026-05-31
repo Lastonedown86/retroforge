@@ -1,3 +1,8 @@
+use std::time::Duration;
+
+use rusb::{Direction, TransferType, UsbContext};
+
+use crate::device::usb::is_fel_device;
 use crate::error::RfError;
 
 // Clovershell command bytes.
@@ -76,6 +81,164 @@ pub fn exec<T: ClovershellIo>(io: &mut T, command: &str) -> Result<ExecOutput, R
             // NEW_RESP assigns the exec id; PONG/others are not interesting here.
             _ => {}
         }
+    }
+}
+
+const TIMEOUT: Duration = Duration::from_millis(3000);
+pub const CLV_EP_IN: u8 = 0x81;
+pub const CLV_EP_OUT: u8 = 0x01;
+
+/// An open, interface-claimed clovershell device with a small read buffer so
+/// `read_packet` can split multi-packet bulk reads and reassemble partial ones.
+pub struct ClovershellTransport {
+    handle: rusb::DeviceHandle<rusb::Context>,
+    ep_in: u8,
+    ep_out: u8,
+    rbuf: Vec<u8>,
+}
+
+impl ClovershellTransport {
+    /// Open the clovershell device (same VID/PID as FEL, but endpoints 0x81/0x01).
+    /// Errors with ShellNotFound if no matching device is present.
+    pub fn open() -> Result<Self, RfError> {
+        let ctx = rusb::Context::new().map_err(|e| RfError::ClovershellProtocol(e.to_string()))?;
+        let devices = ctx
+            .devices()
+            .map_err(|e| RfError::ClovershellProtocol(e.to_string()))?;
+        for device in devices.iter() {
+            let Ok(desc) = device.device_descriptor() else {
+                continue;
+            };
+            // Same VID/PID as FEL; the clovershell device is told apart by its
+            // bulk endpoints (IN 0x81 vs FEL's 0x82), checked below.
+            if !is_fel_device(desc.vendor_id(), desc.product_id()) {
+                continue;
+            }
+            let Ok(handle) = device.open() else { continue };
+            let _ = handle.set_auto_detach_kernel_driver(true);
+            if handle.claim_interface(0).is_err() {
+                continue;
+            }
+            let (ep_in, ep_out) = match clv_endpoints(&device) {
+                Some(eps) => eps,
+                None => continue,
+            };
+            // Only the clovershell interface exposes IN 0x81 (FEL uses 0x82).
+            if ep_in != CLV_EP_IN || ep_out != CLV_EP_OUT {
+                continue;
+            }
+            let mut t = Self {
+                handle,
+                ep_in,
+                ep_out,
+                rbuf: Vec::new(),
+            };
+            t.kill_all_sessions()?;
+            t.drain();
+            return Ok(t);
+        }
+        Err(RfError::ShellNotFound)
+    }
+
+    /// Clear stale shell/exec sessions on the device, mirroring the reference.
+    fn kill_all_sessions(&mut self) -> Result<(), RfError> {
+        self.write_all(&header(CMD_SHELL_KILL_ALL, 0, 0))?;
+        self.write_all(&header(CMD_EXEC_KILL_ALL, 0, 0))?;
+        Ok(())
+    }
+
+    /// Discard any buffered/in-flight input left from a previous session.
+    fn drain(&mut self) {
+        self.rbuf.clear();
+        let mut scratch = [0u8; 4096];
+        while let Ok(n) = self
+            .handle
+            .read_bulk(self.ep_in, &mut scratch, Duration::from_millis(50))
+        {
+            if n == 0 {
+                break;
+            }
+        }
+    }
+
+    fn write_all(&self, data: &[u8]) -> Result<(), RfError> {
+        let mut pos = 0;
+        while pos < data.len() {
+            let n = self
+                .handle
+                .write_bulk(self.ep_out, &data[pos..], TIMEOUT)
+                .map_err(|e| RfError::ClovershellProtocol(e.to_string()))?;
+            if n == 0 {
+                return Err(RfError::ClovershellProtocol("zero-length write".into()));
+            }
+            pos += n;
+        }
+        Ok(())
+    }
+
+    /// True when `rbuf` already holds at least one complete packet.
+    fn has_full_packet(&self) -> Option<usize> {
+        if self.rbuf.len() < 4 {
+            return None;
+        }
+        let len = self.rbuf[2] as usize | ((self.rbuf[3] as usize) << 8);
+        if self.rbuf.len() >= 4 + len {
+            Some(len)
+        } else {
+            None
+        }
+    }
+}
+
+/// Find the first interface's bulk IN/OUT endpoint addresses.
+fn clv_endpoints<T: UsbContext>(device: &rusb::Device<T>) -> Option<(u8, u8)> {
+    let config = device.active_config_descriptor().ok()?;
+    let (mut ep_in, mut ep_out) = (0u8, 0u8);
+    for interface in config.interfaces() {
+        for d in interface.descriptors() {
+            for ep in d.endpoint_descriptors() {
+                if ep.transfer_type() != TransferType::Bulk {
+                    continue;
+                }
+                match ep.direction() {
+                    Direction::In => ep_in = ep.address(),
+                    Direction::Out => ep_out = ep.address(),
+                }
+            }
+        }
+    }
+    Some((ep_in, ep_out))
+}
+
+impl ClovershellIo for ClovershellTransport {
+    fn write_packet(&mut self, cmd: u8, arg: u8, data: &[u8]) -> Result<(), RfError> {
+        self.write_all(&header(cmd, arg, data.len()))?;
+        if !data.is_empty() {
+            self.write_all(data)?;
+        }
+        Ok(())
+    }
+
+    fn read_packet(&mut self) -> Result<Packet, RfError> {
+        let len = loop {
+            if let Some(len) = self.has_full_packet() {
+                break len;
+            }
+            let mut scratch = [0u8; 65536];
+            let n = self
+                .handle
+                .read_bulk(self.ep_in, &mut scratch, TIMEOUT)
+                .map_err(|e| RfError::ClovershellProtocol(e.to_string()))?;
+            if n == 0 {
+                return Err(RfError::ClovershellProtocol("zero-length read".into()));
+            }
+            self.rbuf.extend_from_slice(&scratch[..n]);
+        };
+        let cmd = self.rbuf[0];
+        let arg = self.rbuf[1];
+        let data = self.rbuf[4..4 + len].to_vec();
+        self.rbuf.drain(0..4 + len);
+        Ok(Packet { cmd, arg, data })
     }
 }
 

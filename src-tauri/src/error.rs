@@ -29,6 +29,8 @@ pub enum RfError {
     CmdlineTooLong,
     #[error("clovershell protocol error: {0}")]
     ClovershellProtocol(String),
+    #[error("device shell not found (no clovershell on the bus)")]
+    ShellNotFound,
 }
 
 #[cfg(test)]

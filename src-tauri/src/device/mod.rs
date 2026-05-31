@@ -1,4 +1,7 @@
+pub mod blobs;
 pub mod fel;
+pub mod hmod;
+pub mod memboot;
 pub mod usb;
 
 use serde::Serialize;

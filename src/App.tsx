@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { StatusPanel } from "@/components/StatusPanel";
+import { MembootButton } from "@/components/MembootButton";
 import {
   getDeviceStatus,
   onDeviceStatusChanged,
@@ -21,6 +22,7 @@ export default function App() {
     <main className="mx-auto max-w-md p-8">
       <h1 className="mb-4 text-xl font-bold">RetroForge</h1>
       <StatusPanel status={status} />
+        <MembootButton connected={status.state === "connected"} />
     </main>
   );
 }

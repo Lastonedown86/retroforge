@@ -9,6 +9,106 @@ use crate::error::RfError;
 
 const TIMEOUT: Duration = Duration::from_millis(2000);
 
+/// An open, interface-claimed FEL device plus its bulk endpoints. All FEL
+/// exchanges go through here. rusb DeviceHandle methods take &self, so this is
+/// shared-borrow friendly.
+pub struct FelTransport {
+    handle: rusb::DeviceHandle<rusb::Context>,
+    ep_in: u8,
+    ep_out: u8,
+}
+
+impl FelTransport {
+    /// Open and claim interface 0 of a FEL device. Claim failure (e.g. WinUSB
+    /// not bound) is an error the caller maps to DetectedNoDriver.
+    pub fn open(device: &rusb::Device<rusb::Context>) -> Result<Self, RfError> {
+        let handle = device
+            .open()
+            .map_err(|e| RfError::UsbClaimFailed(e.to_string()))?;
+        let _ = handle.set_auto_detach_kernel_driver(true); // expected to fail on Windows
+        handle
+            .claim_interface(0)
+            .map_err(|e| RfError::UsbClaimFailed(e.to_string()))?;
+        let (ep_in, ep_out) = bulk_endpoints(device)?;
+        Ok(Self {
+            handle,
+            ep_in,
+            ep_out,
+        })
+    }
+
+    fn write_all(&self, data: &[u8]) -> Result<(), RfError> {
+        let mut pos = 0;
+        while pos < data.len() {
+            let n = self
+                .handle
+                .write_bulk(self.ep_out, &data[pos..], TIMEOUT)
+                .map_err(|e| RfError::FelProtocolError(e.to_string()))?;
+            if n == 0 {
+                return Err(RfError::FelProtocolError("zero-length bulk write".into()));
+            }
+            pos += n;
+        }
+        Ok(())
+    }
+
+    fn read_exact(&self, buf: &mut [u8]) -> Result<(), RfError> {
+        let mut pos = 0;
+        while pos < buf.len() {
+            let n = self
+                .handle
+                .read_bulk(self.ep_in, &mut buf[pos..], TIMEOUT)
+                .map_err(|e| RfError::FelProtocolError(e.to_string()))?;
+            if n == 0 {
+                return Err(RfError::FelProtocolError(format!(
+                    "zero-length bulk read at {pos}/{}",
+                    buf.len()
+                )));
+            }
+            pos += n;
+        }
+        Ok(())
+    }
+
+    /// Send a FEL payload: AWUC WRITE envelope, the payload, then drain the
+    /// 13-byte AWUS status.
+    pub fn fel_write(&self, payload: &[u8]) -> Result<(), RfError> {
+        self.write_all(&fel::aw_usb_request(AW_USB_WRITE, payload.len() as u32))?;
+        self.write_all(payload)?;
+        let mut status = [0u8; 13];
+        self.read_exact(&mut status)?;
+        Ok(())
+    }
+
+    /// Read `len` bytes from FEL: AWUC READ envelope, the payload, then drain
+    /// the 13-byte AWUS status.
+    pub fn fel_read(&self, len: usize) -> Result<Vec<u8>, RfError> {
+        self.write_all(&fel::aw_usb_request(AW_USB_READ, len as u32))?;
+        let mut buf = vec![0u8; len];
+        self.read_exact(&mut buf)?;
+        let mut status = [0u8; 13];
+        self.read_exact(&mut status)?;
+        Ok(buf)
+    }
+
+    /// FEL version handshake → SoC identity (slice-1 behavior).
+    pub fn verify_device(&self) -> Result<SocInfo, RfError> {
+        self.fel_write(&fel::fel_request(AW_FEL_VERSION, 0, 0))?;
+        let version = self.fel_read(32)?;
+        let _fel_status = self.fel_read(8)?;
+        fel::parse_version(&version)
+    }
+}
+
+impl crate::device::memboot::FelIo for FelTransport {
+    fn fel_write(&mut self, payload: &[u8]) -> Result<(), RfError> {
+        FelTransport::fel_write(self, payload)
+    }
+    fn fel_read(&mut self, len: usize) -> Result<Vec<u8>, RfError> {
+        FelTransport::fel_read(self, len)
+    }
+}
+
 /// Allwinner FEL USB identity.
 pub const FEL_VID: u16 = 0x1f3a;
 pub const FEL_PID: u16 = 0xefe8;
@@ -83,7 +183,7 @@ fn probe_once(cache: &RefCell<Option<SocInfo>>) -> Result<ProbeOutcome, RfError>
 
         // First sighting: run the handshake once. Claim/transfer failure (e.g.
         // WinUSB not bound yet) maps to DetectedNoDriver and is retried next poll.
-        return match handshake(&device) {
+        return match FelTransport::open(&device).and_then(|t| t.verify_device()) {
             Ok(soc) => {
                 *cache.borrow_mut() = Some(soc.clone());
                 Ok(ProbeOutcome::Connected(soc))
@@ -120,87 +220,6 @@ fn bulk_endpoints<T: UsbContext>(device: &rusb::Device<T>) -> Result<(u8, u8), R
         }
     }
     Ok((ep_in, ep_out))
-}
-
-/// Build the 32-byte AWUC request envelope.
-fn aw_usb_request(req: u16, len: u32) -> [u8; 32] {
-    let mut b = [0u8; 32];
-    b[0..4].copy_from_slice(b"AWUC");
-    b[8..12].copy_from_slice(&len.to_le_bytes());
-    b[12..16].copy_from_slice(&0x0c00_0000u32.to_le_bytes());
-    b[16..18].copy_from_slice(&req.to_le_bytes());
-    b[18..22].copy_from_slice(&len.to_le_bytes());
-    b
-}
-
-/// Build the 16-byte FEL request.
-fn fel_request(request: u32, address: u32, length: u32) -> [u8; 16] {
-    let mut b = [0u8; 16];
-    b[0..4].copy_from_slice(&request.to_le_bytes());
-    b[4..8].copy_from_slice(&address.to_le_bytes());
-    b[8..12].copy_from_slice(&length.to_le_bytes());
-    b
-}
-
-fn handshake<T: UsbContext>(device: &rusb::Device<T>) -> Result<SocInfo, RfError> {
-    let handle = device
-        .open()
-        .map_err(|e| RfError::UsbClaimFailed(e.to_string()))?;
-    let _ = handle.set_auto_detach_kernel_driver(true);
-    handle
-        .claim_interface(0)
-        .map_err(|e| RfError::UsbClaimFailed(e.to_string()))?;
-
-    let (ep_in, ep_out) = bulk_endpoints(device)?;
-
-    let w = |data: &[u8]| -> Result<(), RfError> {
-        handle
-            .write_bulk(ep_out, data, TIMEOUT)
-            .map(|_| ())
-            .map_err(|e| RfError::FelProtocolError(e.to_string()))
-    };
-    // A single bulk transfer may return only the first packet, so loop until the
-    // whole buffer is filled (mirrors the reference ReadFromUSB accumulation).
-    let read_full = |buf: &mut [u8]| -> Result<(), RfError> {
-        let mut pos = 0;
-        while pos < buf.len() {
-            let n = handle
-                .read_bulk(ep_in, &mut buf[pos..], TIMEOUT)
-                .map_err(|e| RfError::FelProtocolError(e.to_string()))?;
-            if n == 0 {
-                return Err(RfError::FelProtocolError(format!(
-                    "zero-length bulk read at {pos}/{}",
-                    buf.len()
-                )));
-            }
-            pos += n;
-        }
-        Ok(())
-    };
-
-    // 1. FelWrite(FEL_VERIFY_DEVICE): AWUC WRITE envelope + 16-byte request,
-    //    then the 13-byte AWUS acknowledgement.
-    let fel_req = fel_request(AW_FEL_VERSION, 0, 0);
-    w(&aw_usb_request(AW_USB_WRITE, fel_req.len() as u32))?;
-    w(&fel_req)?;
-    let mut status = [0u8; 13];
-    read_full(&mut status)?;
-
-    // 2. FelRead(32): AWUC READ envelope + 32-byte version payload + AWUS ack.
-    w(&aw_usb_request(AW_USB_READ, 32))?;
-    let mut version = [0u8; 32];
-    read_full(&mut version)?;
-    read_full(&mut status)?;
-
-    // 3. FelRead(8): drain the trailing FEL status. The reference VerifyDevice
-    //    issues this second read; omitting it leaves bytes in the bulk pipe and
-    //    desyncs the endpoint, so a later exchange reads stale/zero data.
-    w(&aw_usb_request(AW_USB_READ, 8))?;
-    let mut fel_status = [0u8; 8];
-    read_full(&mut fel_status)?;
-    read_full(&mut status)?;
-
-    fel::parse_version(&version)
 }
 
 #[cfg(test)]

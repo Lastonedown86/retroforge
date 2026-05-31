@@ -1,3 +1,5 @@
+pub mod fel;
+
 use serde::Serialize;
 
 /// SoC identity read from the FEL version handshake.

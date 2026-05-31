@@ -12,6 +12,20 @@ pub enum RfError {
     #[error("device disconnected during operation")]
     #[allow(dead_code)] // reserved for slice 2 (memboot/NAND); not yet constructed
     DeviceGone,
+    #[error("memory write failed: {0}")]
+    MemoryWriteFailed(String),
+    #[error("memory read failed: {0}")]
+    MemoryReadFailed(String),
+    #[error("FEL exec failed: {0}")]
+    ExecFailed(String),
+    #[error("boot blob unavailable: {0}")]
+    BlobMissing(String),
+    #[error("memboot timed out waiting for device to leave FEL")]
+    MembootTimeout,
+    #[error("failed to fetch hakchi hmod: {0}")]
+    HmodFetchFailed(String),
+    #[error("failed to extract from hmod: {0}")]
+    HmodExtractFailed(String),
 }
 
 #[cfg(test)]

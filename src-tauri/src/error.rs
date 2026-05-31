@@ -27,6 +27,8 @@ pub enum RfError {
     HmodExtractFailed(String),
     #[error("kernel cmdline has no room for the injected token")]
     CmdlineTooLong,
+    #[error("clovershell protocol error: {0}")]
+    ClovershellProtocol(String),
 }
 
 #[cfg(test)]

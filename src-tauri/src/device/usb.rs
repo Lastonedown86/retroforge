@@ -100,6 +100,15 @@ impl FelTransport {
     }
 }
 
+impl crate::device::memboot::FelIo for FelTransport {
+    fn fel_write(&mut self, payload: &[u8]) -> Result<(), RfError> {
+        FelTransport::fel_write(self, payload)
+    }
+    fn fel_read(&mut self, len: usize) -> Result<Vec<u8>, RfError> {
+        FelTransport::fel_read(self, len)
+    }
+}
+
 /// Allwinner FEL USB identity.
 pub const FEL_VID: u16 = 0x1f3a;
 pub const FEL_PID: u16 = 0xefe8;

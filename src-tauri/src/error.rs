@@ -19,12 +19,16 @@ pub enum RfError {
     #[error("FEL exec failed: {0}")]
     ExecFailed(String),
     #[error("boot blob unavailable: {0}")]
+    #[allow(dead_code)] // reserved for slice 2 (memboot); not yet constructed
     BlobMissing(String),
     #[error("memboot timed out waiting for device to leave FEL")]
+    #[allow(dead_code)] // reserved for slice 2 (memboot); not yet constructed
     MembootTimeout,
     #[error("failed to fetch hakchi hmod: {0}")]
+    #[allow(dead_code)] // reserved for slice 2 (hmod fetch); not yet constructed
     HmodFetchFailed(String),
     #[error("failed to extract from hmod: {0}")]
+    #[allow(dead_code)] // reserved for slice 2 (hmod extract); not yet constructed
     HmodExtractFailed(String),
 }
 

@@ -1,4 +1,5 @@
 pub mod fel;
+pub mod usb;
 
 use serde::Serialize;
 

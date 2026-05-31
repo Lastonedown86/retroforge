@@ -25,8 +25,12 @@ impl DeviceProbe for UsbProbe {
     fn probe(&self) -> ProbeOutcome {
         match probe_once() {
             Ok(outcome) => outcome,
-            // A transient bus error is treated as "nothing usable present".
-            Err(_) => ProbeOutcome::Absent,
+            // A bus error is treated as "nothing usable present" for the UI, but
+            // logged so a silent grey state during hardware bring-up is diagnosable.
+            Err(e) => {
+                eprintln!("device probe error: {e}");
+                ProbeOutcome::Absent
+            }
         }
     }
 }

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod fel;
 pub mod usb;
 

@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::error::RfError;
 
@@ -26,7 +27,14 @@ pub fn ensure_hmod(cache_dir: &Path) -> Result<PathBuf, RfError> {
 }
 
 fn download(url: &str) -> Result<Vec<u8>, RfError> {
-    let resp = ureq::get(url)
+    // Bounded timeouts so a stalled connection fails the worker (and surfaces a
+    // Failed progress event) instead of hanging on "Fetching payload…" forever.
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(120))
+        .build();
+    let resp = agent
+        .get(url)
         .call()
         .map_err(|e| RfError::HmodFetchFailed(e.to_string()))?;
     let mut buf = Vec::new();

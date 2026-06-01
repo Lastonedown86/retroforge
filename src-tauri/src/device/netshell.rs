@@ -1,7 +1,6 @@
-#[allow(unused_imports)]
 use crate::error::RfError;
-#[allow(unused_imports)]
-use std::time::Duration;
+use std::net::{SocketAddr, TcpStream};
+use std::time::{Duration, Instant};
 
 pub const DEVICE_IP: &str = "169.254.13.37";
 pub const SSH_PORT: u16 = 22;
@@ -41,9 +40,55 @@ pub fn fold_events(events: impl IntoIterator<Item = ShellEvent>) -> ExecOutput {
     out
 }
 
+/// Poll a TCP connect to `host:port` until it succeeds or `within` elapses.
+/// Split out so tests can target an arbitrary port; production calls
+/// `wait_for_ssh` with `SSH_PORT`.
+pub fn wait_for_ssh_addr(host: &str, port: u16, within: Duration) -> Result<(), RfError> {
+    let addr: SocketAddr = format!("{host}:{port}")
+        .parse()
+        .map_err(|e: std::net::AddrParseError| RfError::SshError(e.to_string()))?;
+    let deadline = Instant::now() + within;
+    loop {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(RfError::ShellNotFound);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// Wait until the device's SSH port is reachable, or give up after `within`.
+pub fn wait_for_ssh(host: &str, within: Duration) -> Result<(), RfError> {
+    wait_for_ssh_addr(host, SSH_PORT, within)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
+
+    #[test]
+    fn wait_for_ssh_ok_when_port_open() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // A listening socket accepts the connect via the backlog without an
+        // explicit accept(), so no background thread is needed.
+        let r = wait_for_ssh_addr("127.0.0.1", port, Duration::from_secs(2));
+        assert!(r.is_ok(), "expected Ok, got {r:?}");
+    }
+
+    #[test]
+    fn wait_for_ssh_errs_when_port_closed() {
+        // Bind then drop to obtain a port nothing listens on.
+        let port = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let r = wait_for_ssh_addr("127.0.0.1", port, Duration::from_millis(300));
+        assert!(matches!(r, Err(RfError::ShellNotFound)), "got {r:?}");
+    }
 
     #[test]
     fn fold_accumulates_stdout_chunks_and_exit() {

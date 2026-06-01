@@ -31,6 +31,8 @@ pub enum RfError {
     ClovershellProtocol(String),
     #[error("device shell not found (no clovershell on the bus)")]
     ShellNotFound,
+    #[error("SSH error: {0}")]
+    SshError(String),
 }
 
 #[cfg(test)]

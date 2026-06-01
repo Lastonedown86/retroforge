@@ -103,13 +103,24 @@ async fn run_ssh_command_async(
         .await
         .map_err(|e| RfError::SshError(format!("connect: {e}")))?;
 
-    // dropbear `-B` accepts a blank password for root.
+    // The device's dropbear runs `-B` with an empty root password, so the
+    // server grants the SSH "none" method outright (verified on hardware:
+    // `Authenticated ... using "none"`). Try that first; fall back to an
+    // empty-password attempt for resilience against a reconfigured daemon.
     let authed = session
-        .authenticate_password(user, "")
+        .authenticate_none(user)
         .await
-        .map_err(|e| RfError::SshError(format!("auth: {e}")))?;
+        .map_err(|e| RfError::SshError(format!("auth(none): {e}")))?;
+    let authed = if authed.success() {
+        authed
+    } else {
+        session
+            .authenticate_password(user, "")
+            .await
+            .map_err(|e| RfError::SshError(format!("auth(password): {e}")))?
+    };
     if !authed.success() {
-        return Err(RfError::SshError("password auth rejected".into()));
+        return Err(RfError::SshError("auth rejected (none + empty password)".into()));
     }
 
     let mut channel = session

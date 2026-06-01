@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rusb::UsbContext;
+use rusb::{Direction, TransferType, UsbContext};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -56,6 +56,40 @@ fn fel_present() -> bool {
             .map(|desc| is_fel_device(desc.vendor_id(), desc.product_id()))
             .unwrap_or(false)
     })
+}
+
+/// Bulk-IN endpoint of the 1F3A:EFE8 device currently on the bus, if any.
+/// FEL and clovershell share the same VID/PID; only the endpoint tells them
+/// apart — FEL exposes IN `0x82`, clovershell IN `0x81`. `None` = device absent
+/// (e.g. rebooting, or it came up in menu mode with no clovershell gadget).
+/// Reads the config descriptor only; no handle/claim, so it cannot contend with
+/// an in-flight transfer.
+fn dev_bulk_in_ep() -> Option<u8> {
+    let ctx = rusb::Context::new().ok()?;
+    let devices = ctx.devices().ok()?;
+    for device in devices.iter() {
+        let Ok(desc) = device.device_descriptor() else {
+            continue;
+        };
+        if !is_fel_device(desc.vendor_id(), desc.product_id()) {
+            continue;
+        }
+        let Ok(cfg) = device.active_config_descriptor() else {
+            continue;
+        };
+        for interface in cfg.interfaces() {
+            for d in interface.descriptors() {
+                for ep in d.endpoint_descriptors() {
+                    if ep.transfer_type() == TransferType::Bulk
+                        && ep.direction() == Direction::In
+                    {
+                        return Some(ep.address());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Open the currently-present FEL device as a transport.
@@ -204,6 +238,25 @@ fn run_shell(app: &AppHandle, cache_dir: std::path::PathBuf, command: &str) -> R
     }
 
     emit_shell(app, ShellProgress::WaitingForShell);
+    // Localize failure for the hardware loop. The staged image must first leave
+    // FEL (bulk-IN `0x82` disappears) and then re-present as clovershell (IN
+    // `0x81`). Watching the endpoint splits the old catch-all ShellNotFound into
+    // two distinct signals:
+    //   - still on `0x82` after boota  -> the image never took over: a corrupt
+    //     DRAM upload / failed boota, typically a marginal USB session
+    //     (-> MembootTimeout; retry on a healthy session).
+    //   - left FEL but no `0x81`       -> it booted but clovershell did not come
+    //     up: a cmdline/init problem (-> ShellNotFound from wait_for_clovershell).
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match dev_bulk_in_ep() {
+            // clovershell is already up, or the FEL stub has left the bus.
+            Some(clovershell::CLV_EP_IN) | None => break,
+            // Still the FEL endpoint after boota: the image did not boot.
+            Some(_) if Instant::now() >= deadline => return Err(RfError::MembootTimeout),
+            _ => thread::sleep(Duration::from_millis(500)),
+        }
+    }
     let mut transport = wait_for_clovershell(Duration::from_secs(30))?;
 
     emit_shell(app, ShellProgress::Running);

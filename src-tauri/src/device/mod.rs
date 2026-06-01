@@ -4,6 +4,7 @@ pub mod fel;
 pub mod hmod;
 pub mod memboot;
 pub mod netshell;
+pub mod ramdisk;
 pub mod usb;
 
 use serde::Serialize;

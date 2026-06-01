@@ -26,7 +26,7 @@
 - `src-tauri/src/device/bootimg.rs` — **delete.**
 - `src-tauri/src/error.rs` — drop `ClovershellProtocol`, `CmdlineTooLong`;
   reword `ShellNotFound`; add `SshError`.
-- `docs/HARDWARE-ACCEPTANCE-CLOVERSHELL.md` — rewrite for network shell.
+- `docs/HARDWARE-ACCEPTANCE-NETWORK-SHELL.md` — rewrite for network shell.
 
 **Testing-strategy note (deviation from spec):** the spec floated an
 in-process russh *server* test. russh's server API shifts across releases and is
@@ -659,11 +659,11 @@ git commit -m "refactor(core): drop clovershell error variants, add SshError"
 ## Task 8: Hardware acceptance doc
 
 **Files:**
-- Modify: `docs/HARDWARE-ACCEPTANCE-CLOVERSHELL.md`
+- Modify: `docs/HARDWARE-ACCEPTANCE-NETWORK-SHELL.md`
 
 - [ ] **Step 1: Rewrite the doc for the network shell**
 
-Replace the contents of `docs/HARDWARE-ACCEPTANCE-CLOVERSHELL.md` with a
+Replace the contents of `docs/HARDWARE-ACCEPTANCE-NETWORK-SHELL.md` with a
 network-shell acceptance checklist:
 
 ```markdown
@@ -709,7 +709,7 @@ Verify reachability:
 - [ ] **Step 2: Rename the file to match (optional but tidy)**
 
 ```bash
-git mv docs/HARDWARE-ACCEPTANCE-CLOVERSHELL.md docs/HARDWARE-ACCEPTANCE-NETWORK-SHELL.md
+git mv docs/HARDWARE-ACCEPTANCE-NETWORK-SHELL.md docs/HARDWARE-ACCEPTANCE-NETWORK-SHELL.md
 ```
 
 - [ ] **Step 3: Commit**

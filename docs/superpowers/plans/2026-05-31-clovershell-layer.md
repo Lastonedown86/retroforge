@@ -891,11 +891,11 @@ git commit -m "feat(ui): add device shell runner (uname -a)"
 ## Task 7: Hardware acceptance
 
 **Files:**
-- Create: `docs/HARDWARE-ACCEPTANCE-CLOVERSHELL.md`
+- Create: `docs/HARDWARE-ACCEPTANCE-NETWORK-SHELL.md`
 
 - [ ] **Step 1: Write the checklist**
 
-Create `docs/HARDWARE-ACCEPTANCE-CLOVERSHELL.md`:
+Create `docs/HARDWARE-ACCEPTANCE-NETWORK-SHELL.md`:
 
 ```markdown
 # Hardware Acceptance — Clovershell Layer (slice 3)
@@ -931,7 +931,7 @@ brick path. Recover by unplug → hold RESET → replug into FEL.
 - [ ] **Step 2: Commit**
 
 ```bash
-git add docs/HARDWARE-ACCEPTANCE-CLOVERSHELL.md
+git add docs/HARDWARE-ACCEPTANCE-NETWORK-SHELL.md
 git commit -m "docs: add clovershell hardware acceptance checklist"
 ```
 

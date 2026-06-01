@@ -149,7 +149,7 @@ shifted across minor releases.
   mock coverage being deleted.
 
 ### Hardware acceptance (manual)
-- Update `docs/HARDWARE-ACCEPTANCE-CLOVERSHELL.md` → network shell:
+- Update `docs/HARDWARE-ACCEPTANCE-NETWORK-SHELL.md` → network shell:
   - Document the host RNDIS NIC bind (Device Manager → bind generic "Remote
     NDIS Compatible Device" to `04E8:6863`; remove/avoid Samsung USB driver
     hijack; clean up stale RNDIS adapter instances).

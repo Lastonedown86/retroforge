@@ -1,4 +1,8 @@
 use crate::error::RfError;
+use std::io::{Read, Write};
+use xz2::read::XzDecoder;
+use xz2::stream::{Check, Stream};
+use xz2::write::XzEncoder;
 
 const NEWC_MAGIC: &[u8; 6] = b"070701";
 const HDR_LEN: usize = 110;
@@ -93,6 +97,27 @@ pub fn cpio_replace(cpio: &[u8], path: &str, new_data: &[u8]) -> Result<Vec<u8>,
     Ok(out)
 }
 
+/// Decompress an XZ stream.
+pub fn xz_decompress(data: &[u8]) -> Result<Vec<u8>, RfError> {
+    let mut out = Vec::new();
+    XzDecoder::new(data)
+        .read_to_end(&mut out)
+        .map_err(|e| RfError::RamdiskError(format!("xz decompress: {e}")))?;
+    Ok(out)
+}
+
+/// Compress to an XZ stream with a CRC32 integrity check (matches the kernel's
+/// expectations for an XZ-compressed ramdisk).
+pub fn xz_compress(data: &[u8]) -> Result<Vec<u8>, RfError> {
+    let stream = Stream::new_easy_encoder(6, Check::Crc32)
+        .map_err(|e| RfError::RamdiskError(format!("xz init: {e}")))?;
+    let mut enc = XzEncoder::new_stream(Vec::new(), stream);
+    enc.write_all(data)
+        .map_err(|e| RfError::RamdiskError(format!("xz write: {e}")))?;
+    enc.finish()
+        .map_err(|e| RfError::RamdiskError(format!("xz finish: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +184,23 @@ mod tests {
         let arc = archive(&[entry("x", b"1")]);
         assert!(matches!(
             cpio_replace(&arc, "nope", b"z"),
+            Err(RfError::RamdiskError(_))
+        ));
+    }
+
+    #[test]
+    fn xz_round_trips() {
+        let data = b"the quick brown fox jumps over the lazy dog".repeat(50);
+        let comp = xz_compress(&data).unwrap();
+        assert_ne!(comp, data, "should actually compress/encode");
+        let back = xz_decompress(&comp).unwrap();
+        assert_eq!(back, data);
+    }
+
+    #[test]
+    fn xz_decompress_rejects_garbage() {
+        assert!(matches!(
+            xz_decompress(b"not an xz stream at all"),
             Err(RfError::RamdiskError(_))
         ));
     }

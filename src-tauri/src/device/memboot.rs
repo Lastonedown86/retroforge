@@ -63,9 +63,20 @@ pub fn read_memory<T: FelIo>(io: &mut T, addr: u32, len: u32) -> Result<Vec<u8>,
     Ok(out)
 }
 
-/// Execute code at `addr` (FEL_RUN). No status follows; the device runs.
+/// Execute code at `addr` (FEL_RUN). The device sends an 8-byte FEL status
+/// (the run acknowledgement) that MUST be drained, exactly as for downloads —
+/// sunxi/hakchi read it after every FEL_RUN. Leaving it on the IN endpoint
+/// desyncs the next command (manifests as a hang on the *following* transfer,
+/// e.g. the boot-image upload after fes1, or the poll after boota).
 pub fn exec<T: FelIo>(io: &mut T, addr: u32) -> Result<(), RfError> {
-    io.fel_write(&fel::fel_request(fel::FEL_RUN, addr, 0))
+    io.fel_write(&fel::fel_request(fel::FEL_RUN, addr, 0))?;
+    let status = io.fel_read(8)?;
+    if !status_ok(&status) {
+        return Err(RfError::ExecFailed(format!(
+            "bad FEL run status at {addr:#x}"
+        )));
+    }
+    Ok(())
 }
 
 /// Bring up DRAM: load the fes1 blob into SRAM and execute it.

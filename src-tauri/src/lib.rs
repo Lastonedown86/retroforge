@@ -9,10 +9,11 @@ use rusb::UsbContext;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Set while a memboot is in progress so the background poll thread does not
-/// open/claim the FEL interface and disturb memboot's bulk transfers.
-static MEMBOOT_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Set while a privileged device operation (memboot, shell) holds the USB
+/// interface, so the background poll thread does not contend for it.
+static DEVICE_BUSY: AtomicBool = AtomicBool::new(false);
 
+use crate::device::netshell;
 use crate::device::usb::{is_fel_device, FelTransport, UsbProbe};
 use crate::device::{blobs, fel, memboot as memboot_ops};
 use crate::device::{DeviceStatus, Monitor};
@@ -143,9 +144,9 @@ fn memboot(app: AppHandle) {
     std::thread::spawn(move || {
         // Hold off the poll thread for the duration so it does not contend for
         // the USB interface mid-transfer. Reset on every exit path.
-        MEMBOOT_ACTIVE.store(true, Ordering::SeqCst);
+        DEVICE_BUSY.store(true, Ordering::SeqCst);
         let result = run_memboot(&app, cache_dir);
-        MEMBOOT_ACTIVE.store(false, Ordering::SeqCst);
+        DEVICE_BUSY.store(false, Ordering::SeqCst);
         match result {
             Ok(()) => emit_progress(&app, MembootProgress::Success),
             Err(e) => emit_progress(
@@ -154,6 +155,99 @@ fn memboot(app: AppHandle) {
                     message: e.to_string(),
                 },
             ),
+        }
+    });
+}
+
+const SHELL_PROGRESS_EVENT: &str = "shell-progress";
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "phase", rename_all = "camelCase")]
+enum ShellProgress {
+    FetchingPayload,
+    Membooting,
+    WaitingForShell,
+    Running,
+    Done { stdout: String, exit_code: i32 },
+    Failed { message: String },
+}
+
+fn emit_shell(app: &AppHandle, p: ShellProgress) {
+    let _ = app.emit(SHELL_PROGRESS_EVENT, p);
+}
+
+/// Memboot the plain boot image (brings up the RNDIS gadget), then SSH to the
+/// device and run the command. The default boot.img starts dropbear on
+/// 169.254.13.37:22; no cmdline injection is needed.
+fn run_shell(app: &AppHandle, cache_dir: std::path::PathBuf, command: &str) -> Result<(), RfError> {
+    emit_shell(app, ShellProgress::FetchingPayload);
+    blobs::ensure_blobs(&cache_dir)?;
+    let fes1 = blobs::fes1();
+    let uboot = to_sd_uboot(&blobs::uboot(&cache_dir)?);
+    let boot_img = blobs::boot_img(&cache_dir)?;
+
+    emit_shell(app, ShellProgress::Membooting);
+    {
+        let mut transport = open_fel()?;
+        memboot_ops::init_dram(&mut transport, fes1)?;
+        // DRAM settle after fes1 exec. 5s (vs memboot's 2s) — marginal devices
+        // need longer before the first DRAM write lands.
+        thread::sleep(Duration::from_millis(5000));
+        let padded = boot_img.len().div_ceil(fel::SECTOR_SIZE) * fel::SECTOR_SIZE;
+        if padded as u32 > fel::TRANSFER_MAX_SIZE {
+            return Err(RfError::ExecFailed("boot image too large".into()));
+        }
+        let mut kernel = boot_img.clone();
+        kernel.resize(padded, 0);
+        memboot_ops::write_memory(&mut transport, fel::TRANSFER_BASE, &kernel)?;
+        let cmd = format!("boota {:x}", fel::TRANSFER_BASE);
+        memboot_ops::run_uboot_cmd(&mut transport, &uboot, &cmd)?;
+    }
+
+    emit_shell(app, ShellProgress::WaitingForShell);
+    // Two-phase failure localization:
+    //   - FEL never leaves the bus  -> image didn't boot (corrupt upload /
+    //     failed boota) -> MembootTimeout, retry on a healthy session.
+    //   - FEL left but SSH never reachable -> booted but no network shell
+    //     (host RNDIS NIC unbound, RNDIS down) -> ShellNotFound.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while fel_present() {
+        if Instant::now() >= deadline {
+            return Err(RfError::MembootTimeout);
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+    netshell::wait_for_ssh(netshell::DEVICE_IP, Duration::from_secs(30))?;
+
+    emit_shell(app, ShellProgress::Running);
+    let out = netshell::run_ssh_command(netshell::DEVICE_IP, "root", command)?;
+    emit_shell(
+        app,
+        ShellProgress::Done {
+            stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+            exit_code: out.exit_code,
+        },
+    );
+    Ok(())
+}
+
+#[tauri::command]
+fn open_shell_and_run(app: AppHandle, command: String) {
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    std::thread::spawn(move || {
+        DEVICE_BUSY.store(true, Ordering::SeqCst);
+        let result = run_shell(&app, cache_dir, &command);
+        DEVICE_BUSY.store(false, Ordering::SeqCst);
+        if let Err(e) = result {
+            emit_shell(
+                &app,
+                ShellProgress::Failed {
+                    message: e.to_string(),
+                },
+            );
         }
     });
 }
@@ -169,14 +263,18 @@ fn get_device_status() -> DeviceStatus {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_device_status, memboot])
+        .invoke_handler(tauri::generate_handler![
+            get_device_status,
+            memboot,
+            open_shell_and_run
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
             thread::spawn(move || {
                 let mut monitor = Monitor::new(UsbProbe::new());
                 loop {
                     // Skip probing while a memboot holds the interface.
-                    if !MEMBOOT_ACTIVE.load(Ordering::SeqCst) {
+                    if !DEVICE_BUSY.load(Ordering::SeqCst) {
                         if let Some(status) = monitor.tick() {
                             let _ = handle.emit(STATUS_EVENT, status);
                         }

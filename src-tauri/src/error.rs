@@ -25,6 +25,10 @@ pub enum RfError {
     HmodFetchFailed(String),
     #[error("failed to extract from hmod: {0}")]
     HmodExtractFailed(String),
+    #[error("device shell unreachable over the network")]
+    ShellNotFound,
+    #[error("SSH error: {0}")]
+    SshError(String),
 }
 
 #[cfg(test)]

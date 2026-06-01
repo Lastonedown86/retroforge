@@ -72,7 +72,9 @@ pub fn exec<T: FelIo>(io: &mut T, addr: u32) -> Result<(), RfError> {
     io.fel_write(&fel::fel_request(fel::FEL_RUN, addr, 0))?;
     let status = io.fel_read(8)?;
     if !status_ok(&status) {
-        return Err(RfError::ExecFailed(format!("bad FEL run status at {addr:#x}")));
+        return Err(RfError::ExecFailed(format!(
+            "bad FEL run status at {addr:#x}"
+        )));
     }
     Ok(())
 }

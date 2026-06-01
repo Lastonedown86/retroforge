@@ -120,7 +120,9 @@ async fn run_ssh_command_async(
             .map_err(|e| RfError::SshError(format!("auth(password): {e}")))?
     };
     if !authed.success() {
-        return Err(RfError::SshError("auth rejected (none + empty password)".into()));
+        return Err(RfError::SshError(
+            "auth rejected (none + empty password)".into(),
+        ));
     }
 
     let mut channel = session
@@ -135,9 +137,7 @@ async fn run_ssh_command_async(
     let mut events: Vec<ShellEvent> = Vec::new();
     while let Some(msg) = channel.wait().await {
         match msg {
-            russh::ChannelMsg::Data { ref data } => {
-                events.push(ShellEvent::Stdout(data.to_vec()))
-            }
+            russh::ChannelMsg::Data { ref data } => events.push(ShellEvent::Stdout(data.to_vec())),
             russh::ChannelMsg::ExtendedData { ref data, ext: 1 } => {
                 events.push(ShellEvent::Stderr(data.to_vec()))
             }
@@ -191,10 +191,7 @@ mod tests {
 
     #[test]
     fn fold_captures_stderr_and_nonzero_exit() {
-        let out = fold_events([
-            ShellEvent::Stderr(b"nope".to_vec()),
-            ShellEvent::Exit(1),
-        ]);
+        let out = fold_events([ShellEvent::Stderr(b"nope".to_vec()), ShellEvent::Exit(1)]);
         assert_eq!(out.stderr, b"nope");
         assert_eq!(out.exit_code, 1);
     }

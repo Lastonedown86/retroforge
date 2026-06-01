@@ -45,7 +45,7 @@ export function BootScreenRunner({ connected }: { connected: boolean }) {
 
   return (
     <div className="mt-4 flex flex-col gap-2">
-      <label className="rounded-md border px-4 py-2 text-sm font-medium disabled:opacity-50">
+      <label className={`rounded-md border px-4 py-2 text-sm font-medium${!connected || running ? " opacity-50" : ""}`}>
         Choose boot-screen PNG…
         <input
           type="file"

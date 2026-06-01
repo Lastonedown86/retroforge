@@ -1,4 +1,5 @@
 pub mod blobs;
+pub mod bootimage;
 pub mod fel;
 pub mod hmod;
 pub mod memboot;

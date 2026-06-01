@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { membootBootscreen } from "@/lib/bootscreen";
-import { onMembootProgress, type MembootProgress } from "@/lib/memboot";
+import { membootBootscreen, onBootscreenProgress } from "@/lib/bootscreen";
+import { type MembootProgress } from "@/lib/memboot";
 
 const LABELS: Record<MembootProgress["phase"], string> = {
   fetchingPayload: "Building custom boot image…",
@@ -18,7 +18,7 @@ export function BootScreenRunner({ connected }: { connected: boolean }) {
   const [progress, setProgress] = useState<MembootProgress | undefined>();
 
   useEffect(() => {
-    const unlisten = onMembootProgress(setProgress);
+    const unlisten = onBootscreenProgress(setProgress);
     return () => {
       unlisten.then((fn) => fn());
     };

@@ -33,7 +33,13 @@ fn parse(img: &[u8]) -> Result<Layout, RfError> {
     if ramdisk_off + ramdisk_size > img.len() {
         return Err(RfError::ExecFailed("truncated boot image".into()));
     }
-    Ok(Layout { page, kernel_off, kernel_size, ramdisk_off, ramdisk_size })
+    Ok(Layout {
+        page,
+        kernel_off,
+        kernel_size,
+        ramdisk_off,
+        ramdisk_size,
+    })
 }
 
 /// The compressed ramdisk bytes from an Android boot image.
@@ -101,8 +107,14 @@ mod tests {
     fn replace_ramdisk_updates_size_and_bytes_keeps_kernel() {
         let img = make_img(2048, b"KERNELDATA", b"OLDRAMDISK");
         let out = replace_ramdisk(&img, b"A_MUCH_LONGER_NEW_RAMDISK_PAYLOAD").unwrap();
-        assert_eq!(rd_u32(&out, 16) as usize, b"A_MUCH_LONGER_NEW_RAMDISK_PAYLOAD".len());
-        assert_eq!(extract_ramdisk(&out).unwrap(), b"A_MUCH_LONGER_NEW_RAMDISK_PAYLOAD");
+        assert_eq!(
+            rd_u32(&out, 16) as usize,
+            b"A_MUCH_LONGER_NEW_RAMDISK_PAYLOAD".len()
+        );
+        assert_eq!(
+            extract_ramdisk(&out).unwrap(),
+            b"A_MUCH_LONGER_NEW_RAMDISK_PAYLOAD"
+        );
         let page = 2048usize;
         assert_eq!(&out[page..page + b"KERNELDATA".len()], b"KERNELDATA");
     }

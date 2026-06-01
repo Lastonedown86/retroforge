@@ -33,7 +33,11 @@ struct CpioIter<'a> {
 
 impl<'a> CpioIter<'a> {
     fn new(buf: &'a [u8]) -> Self {
-        Self { buf, pos: 0, done: false }
+        Self {
+            buf,
+            pos: 0,
+            done: false,
+        }
     }
 }
 
@@ -51,10 +55,16 @@ impl<'a> Iterator for CpioIter<'a> {
         let namesize = hex8(h, 94);
         let name_off = self.pos + HDR_LEN;
         let name_end = name_off + namesize;
-        let name = String::from_utf8_lossy(&self.buf[name_off..name_end - 1]).to_string();
         let data_off = align4(name_end);
         let data_end = data_off + filesize;
         let next = align4(data_end);
+        // Guard against a malformed/truncated archive: a corrupt header could
+        // claim sizes that run past the buffer. End iteration cleanly instead
+        // of panicking on an out-of-bounds slice.
+        if namesize < 1 || name_end > self.buf.len() || data_end > self.buf.len() {
+            return None;
+        }
+        let name = String::from_utf8_lossy(&self.buf[name_off..name_end - 1]).to_string();
         let ent = Entry {
             name: name.clone(),
             data: &self.buf[data_off..data_end],
@@ -138,16 +148,19 @@ mod tests {
         let f = |n: u32| format!("{n:08x}");
         v.extend_from_slice(b"070701");
         let fields = [
-            1u32,            // ino
-            0o100644,        // mode
-            0,               // uid
-            0,               // gid
-            1,               // nlink
-            0,               // mtime
+            1u32,              // ino
+            0o100644,          // mode
+            0,                 // uid
+            0,                 // gid
+            1,                 // nlink
+            0,                 // mtime
             data.len() as u32, // filesize  (offset 54)
-            0, 0, 0, 0,      // devmajor, devminor, rdevmajor, rdevminor
+            0,
+            0,
+            0,
+            0,                       // devmajor, devminor, rdevmajor, rdevminor
             (name.len() + 1) as u32, // namesize (offset 94)
-            0,               // check
+            0,                       // check
         ];
         for x in fields {
             v.extend_from_slice(f(x).as_bytes());
@@ -178,13 +191,27 @@ mod tests {
     }
 
     #[test]
+    fn cpio_iter_stops_on_truncated_without_panic() {
+        // A header claiming a large namesize but no body → iterator must stop, not panic.
+        let mut bad = b"070701".to_vec();
+        bad.extend_from_slice(&[b'f'; 104]); // rest of a 110-byte header (garbage hex)
+                                             // namesize field (offset 94..102) set to a huge value:
+        bad[94..102].copy_from_slice(b"ffffffff");
+        let got: Vec<_> = CpioIter::new(&bad).collect::<Vec<_>>();
+        assert!(got.is_empty() || got.iter().all(|_| true)); // must simply not panic
+    }
+
+    #[test]
     fn cpio_replace_swaps_target_keeps_siblings() {
         let a = entry("etc/a.txt", b"AAAA");
         let target = entry("etc/boot.png", b"OLD");
         let c = entry("etc/c.txt", b"CCCC");
         let arc = archive(&[a.clone(), target, c.clone()]);
         let out = cpio_replace(&arc, "etc/boot.png", b"NEWLONGERPNGDATA").unwrap();
-        assert_eq!(cpio_read(&out, "etc/boot.png").unwrap(), b"NEWLONGERPNGDATA");
+        assert_eq!(
+            cpio_read(&out, "etc/boot.png").unwrap(),
+            b"NEWLONGERPNGDATA"
+        );
         assert_eq!(cpio_read(&out, "etc/a.txt").unwrap(), b"AAAA");
         assert_eq!(cpio_read(&out, "etc/c.txt").unwrap(), b"CCCC");
     }

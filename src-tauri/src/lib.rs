@@ -24,6 +24,8 @@ const STATUS_EVENT: &str = "device-status-changed";
 
 const MEMBOOT_PROGRESS_EVENT: &str = "memboot-progress";
 
+const BOOTSCREEN_PROGRESS_EVENT: &str = "bootscreen-progress";
+
 #[derive(Clone, Serialize)]
 #[serde(tag = "phase", rename_all = "camelCase")]
 enum MembootProgress {
@@ -38,8 +40,12 @@ enum MembootProgress {
     Failed { message: String },
 }
 
+fn emit_progress_to(app: &AppHandle, event: &str, p: MembootProgress) {
+    let _ = app.emit(event, p);
+}
+
 fn emit_progress(app: &AppHandle, p: MembootProgress) {
-    let _ = app.emit(MEMBOOT_PROGRESS_EVENT, p);
+    emit_progress_to(app, MEMBOOT_PROGRESS_EVENT, p);
 }
 
 /// True if a FEL device is currently enumerated.
@@ -90,7 +96,7 @@ fn run_memboot(app: &AppHandle, cache_dir: std::path::PathBuf) -> Result<(), RfE
     emit_progress(app, MembootProgress::FetchingPayload);
     blobs::ensure_blobs(&cache_dir)?;
     let boot_img = blobs::boot_img(&cache_dir)?;
-    stage_boot_image(app, &cache_dir, &boot_img)
+    stage_boot_image(app, &cache_dir, &boot_img, MEMBOOT_PROGRESS_EVENT)
 }
 
 /// Shared memboot staging: init DRAM, write the given boot image, boota it, and
@@ -100,6 +106,7 @@ fn stage_boot_image(
     app: &AppHandle,
     cache_dir: &std::path::Path,
     boot_img: &[u8],
+    progress_event: &str,
 ) -> Result<(), RfError> {
     let fes1 = blobs::fes1();
     // Hakchi memboots with the "SD" U-Boot variant: the last two 4-byte words
@@ -107,17 +114,17 @@ fn stage_boot_image(
     // the SD variant boota's the image we staged in RAM.
     let uboot = to_sd_uboot(&blobs::uboot(cache_dir)?);
 
-    emit_progress(app, MembootProgress::Connecting);
+    emit_progress_to(app, progress_event, MembootProgress::Connecting);
     let mut transport = open_fel()?;
 
-    emit_progress(app, MembootProgress::InitDram);
+    emit_progress_to(app, progress_event, MembootProgress::InitDram);
     memboot_ops::init_dram(&mut transport, fes1)?;
     // The DRAM controller needs time to come up after fes1 runs before we can
     // write to DRAM addresses; the reference (Hakchi InitDram) sleeps 2s here.
     // Without it the first DRAM bulk write hits uninitialized memory and stalls.
     thread::sleep(Duration::from_millis(2000));
 
-    emit_progress(app, MembootProgress::LoadingImage);
+    emit_progress_to(app, progress_event, MembootProgress::LoadingImage);
     let padded = boot_img.len().div_ceil(fel::SECTOR_SIZE) * fel::SECTOR_SIZE;
     if padded as u32 > fel::TRANSFER_MAX_SIZE {
         return Err(RfError::ExecFailed("boot image too large".into()));
@@ -126,14 +133,14 @@ fn stage_boot_image(
     kernel.resize(padded, 0);
     memboot_ops::write_memory(&mut transport, fel::TRANSFER_BASE, &kernel)?;
 
-    emit_progress(app, MembootProgress::LoadingUboot);
-    emit_progress(app, MembootProgress::Executing);
+    emit_progress_to(app, progress_event, MembootProgress::LoadingUboot);
+    emit_progress_to(app, progress_event, MembootProgress::Executing);
     let cmd = format!("boota {:x}", fel::TRANSFER_BASE);
     memboot_ops::run_uboot_cmd(&mut transport, &uboot, &cmd)?;
 
     // Success = the FEL device leaves the bus (it is now running the image).
     drop(transport);
-    emit_progress(app, MembootProgress::WaitingForExit);
+    emit_progress_to(app, progress_event, MembootProgress::WaitingForExit);
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
         if !fel_present() {
@@ -175,11 +182,15 @@ fn run_bootscreen(
     cache_dir: std::path::PathBuf,
     png: &[u8],
 ) -> Result<(), RfError> {
-    emit_progress(app, MembootProgress::FetchingPayload);
+    emit_progress_to(
+        app,
+        BOOTSCREEN_PROGRESS_EVENT,
+        MembootProgress::FetchingPayload,
+    );
     blobs::ensure_blobs(&cache_dir)?;
     let stock = blobs::boot_img(&cache_dir)?;
     let custom = bootscreen::build_custom_bootimg(&stock, png)?;
-    stage_boot_image(app, &cache_dir, &custom)
+    stage_boot_image(app, &cache_dir, &custom, BOOTSCREEN_PROGRESS_EVENT)
 }
 
 #[tauri::command]
@@ -195,9 +206,10 @@ fn memboot_bootscreen(app: AppHandle, png: Vec<u8>) {
         let result = run_bootscreen(&app, cache_dir, &png);
         DEVICE_BUSY.store(false, Ordering::SeqCst);
         match result {
-            Ok(()) => emit_progress(&app, MembootProgress::Success),
-            Err(e) => emit_progress(
+            Ok(()) => emit_progress_to(&app, BOOTSCREEN_PROGRESS_EVENT, MembootProgress::Success),
+            Err(e) => emit_progress_to(
                 &app,
+                BOOTSCREEN_PROGRESS_EVENT,
                 MembootProgress::Failed {
                     message: e.to_string(),
                 },

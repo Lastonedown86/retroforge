@@ -37,11 +37,18 @@ modify → deploy → observe loop end-to-end with the smallest possible change
   `bin/decodepng` to the framebuffer.
 - These files live **inside the `boot.img` ramdisk overlay**
   (`hakchi/rootfs/etc/...`), not on NAND. So a repacked `boot.img` carrying a
-  different `boot.png` shows a different logo when membooted — no persistence
+  different logo PNG shows a different logo when membooted — no persistence
   needed.
 - The cached `boot.img` ramdisk is **XZ-compressed newc cpio** (magic
-  `fd 37 7a 58 5a 00`), decompressing to the cpio that contains
-  `hakchi/rootfs/etc/boot.png` and the hakchi overlay.
+  `fd 37 7a 58 5a 00`), decompressing to the cpio that contains the hakchi
+  overlay.
+- **CORRECTION (verified on the real image during implementation):** the swap
+  target is **`hakchi/rootfs/etc/hakchi.png`**, NOT `boot.png`. The ramdisk
+  contains no `boot.png`; `showImage`'s chain falls through `boot.png` (absent)
+  to `$modname.png` → `hakchi.png`, which is the logo that actually displays.
+  `BOOT_PNG_PATH` in `bootscreen.rs` is set to `hakchi.png`, and the real-asset
+  test passes against it. Other `boot.png` mentions below are the original
+  (pre-correction) wording.
 
 ## Architecture
 

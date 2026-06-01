@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: CI only needs to read the repo. Denies the workflow token
+# write access (important for a public repo where fork PRs run this workflow).
+permissions:
+  contents: read
+
 jobs:
   frontend:
     runs-on: windows-latest

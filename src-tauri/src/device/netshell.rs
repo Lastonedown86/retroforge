@@ -64,6 +64,82 @@ pub fn wait_for_ssh(host: &str, within: Duration) -> Result<(), RfError> {
     wait_for_ssh_addr(host, SSH_PORT, within)
 }
 
+use std::sync::Arc;
+
+/// Accept any server key — the device is a fixed link-local peer over a private
+/// USB-ethernet link; there is no PKI to validate against.
+struct AcceptAnyKey;
+
+impl russh::client::Handler for AcceptAnyKey {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        _server_public_key: &russh::keys::ssh_key::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        Ok(true)
+    }
+}
+
+/// Connect to `host:22`, authenticate as `user` with an empty password
+/// (dropbear runs `-B`, root has no password), run one command, and collect
+/// stdout/stderr/exit. Bridges the sync worker thread to russh's async API via
+/// a current-thread tokio runtime.
+pub fn run_ssh_command(host: &str, user: &str, command: &str) -> Result<ExecOutput, RfError> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| RfError::SshError(e.to_string()))?;
+    rt.block_on(run_ssh_command_async(host, user, command))
+}
+
+async fn run_ssh_command_async(
+    host: &str,
+    user: &str,
+    command: &str,
+) -> Result<ExecOutput, RfError> {
+    let config = Arc::new(russh::client::Config::default());
+    let mut session = russh::client::connect(config, (host, SSH_PORT), AcceptAnyKey)
+        .await
+        .map_err(|e| RfError::SshError(format!("connect: {e}")))?;
+
+    // dropbear `-B` accepts a blank password for root.
+    let authed = session
+        .authenticate_password(user, "")
+        .await
+        .map_err(|e| RfError::SshError(format!("auth: {e}")))?;
+    if !authed.success() {
+        return Err(RfError::SshError("password auth rejected".into()));
+    }
+
+    let mut channel = session
+        .channel_open_session()
+        .await
+        .map_err(|e| RfError::SshError(format!("open channel: {e}")))?;
+    channel
+        .exec(true, command)
+        .await
+        .map_err(|e| RfError::SshError(format!("exec: {e}")))?;
+
+    let mut events: Vec<ShellEvent> = Vec::new();
+    while let Some(msg) = channel.wait().await {
+        match msg {
+            russh::ChannelMsg::Data { ref data } => {
+                events.push(ShellEvent::Stdout(data.to_vec()))
+            }
+            russh::ChannelMsg::ExtendedData { ref data, ext: 1 } => {
+                events.push(ShellEvent::Stderr(data.to_vec()))
+            }
+            russh::ChannelMsg::ExitStatus { exit_status } => {
+                events.push(ShellEvent::Exit(exit_status as i32))
+            }
+            russh::ChannelMsg::Eof | russh::ChannelMsg::Close => {}
+            _ => {}
+        }
+    }
+    Ok(fold_events(events))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,5 +192,19 @@ mod tests {
     fn fold_defaults_exit_to_minus_one_when_absent() {
         let out = fold_events([ShellEvent::Stdout(b"x".to_vec())]);
         assert_eq!(out.exit_code, -1);
+    }
+
+    // Hardware-only: requires a memboot'd device reachable on the RNDIS link.
+    // Run after a successful memboot with the host RNDIS NIC bound:
+    //   cargo test --manifest-path src-tauri/Cargo.toml \
+    //     run_ssh_command_uname -- --ignored --nocapture
+    #[test]
+    #[ignore = "needs a memboot'd device on 169.254.13.37"]
+    fn run_ssh_command_uname() {
+        wait_for_ssh(DEVICE_IP, Duration::from_secs(30)).expect("ssh reachable");
+        let out = run_ssh_command(DEVICE_IP, "root", "uname -a").expect("exec");
+        eprintln!("stdout: {}", String::from_utf8_lossy(&out.stdout));
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.windows(5).any(|w| w == b"Linux"));
     }
 }

@@ -4,6 +4,7 @@ pub mod clovershell;
 pub mod fel;
 pub mod hmod;
 pub mod memboot;
+pub mod netshell;
 pub mod usb;
 
 use serde::Serialize;

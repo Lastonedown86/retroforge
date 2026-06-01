@@ -189,7 +189,9 @@ fn run_shell(app: &AppHandle, cache_dir: std::path::PathBuf, command: &str) -> R
     {
         let mut transport = open_fel()?;
         memboot_ops::init_dram(&mut transport, fes1)?;
-        thread::sleep(Duration::from_millis(2000));
+        // DRAM settle after fes1 exec. 5s (vs memboot's 2s) — hardware bring-up
+        // showed marginal devices need longer before the first DRAM write lands.
+        thread::sleep(Duration::from_millis(5000));
         let padded = boot_img.len().div_ceil(fel::SECTOR_SIZE) * fel::SECTOR_SIZE;
         if padded as u32 > fel::TRANSFER_MAX_SIZE {
             return Err(RfError::ExecFailed("boot image too large".into()));
@@ -262,7 +264,11 @@ fn get_device_status() -> DeviceStatus {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_device_status, memboot, open_shell_and_run])
+        .invoke_handler(tauri::generate_handler![
+            get_device_status,
+            memboot,
+            open_shell_and_run
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
             thread::spawn(move || {

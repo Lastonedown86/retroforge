@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { StatusPanel } from "@/components/StatusPanel";
 import { MembootButton } from "@/components/MembootButton";
 import { ShellRunner } from "@/components/ShellRunner";
+import { BootScreenRunner } from "@/components/BootScreenRunner";
 import {
   getDeviceStatus,
   onDeviceStatusChanged,
@@ -25,6 +26,7 @@ export default function App() {
       <StatusPanel status={status} />
         <MembootButton connected={status.state === "connected"} />
         <ShellRunner connected={status.state === "connected"} />
+        <BootScreenRunner connected={status.state === "connected"} />
     </main>
   );
 }

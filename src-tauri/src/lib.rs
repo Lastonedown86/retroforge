@@ -13,8 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 /// interface, so the background poll thread does not contend for it.
 static DEVICE_BUSY: AtomicBool = AtomicBool::new(false);
 
-use crate::device::bootimg;
-use crate::device::clovershell::{self, ClovershellTransport};
+use crate::device::netshell;
 use crate::device::usb::{is_fel_device, FelTransport, UsbProbe};
 use crate::device::{blobs, fel, memboot as memboot_ops};
 use crate::device::{DeviceStatus, Monitor};
@@ -211,20 +210,22 @@ fn emit_shell(app: &AppHandle, p: ShellProgress) {
     let _ = app.emit(SHELL_PROGRESS_EVENT, p);
 }
 
-/// Memboot with the clovershell cmdline, then connect + ping + exec the command.
+/// Memboot the plain boot image (brings up the RNDIS gadget), then SSH to the
+/// device and run the command. The default boot.img starts dropbear on
+/// 169.254.13.37:22; no cmdline injection is needed.
 fn run_shell(app: &AppHandle, cache_dir: std::path::PathBuf, command: &str) -> Result<(), RfError> {
     emit_shell(app, ShellProgress::FetchingPayload);
     blobs::ensure_blobs(&cache_dir)?;
     let fes1 = blobs::fes1();
     let uboot = to_sd_uboot(&blobs::uboot(&cache_dir)?);
-    let boot_img = bootimg::inject_cmdline(&blobs::boot_img(&cache_dir)?, "hakchi-clovershell")?;
+    let boot_img = blobs::boot_img(&cache_dir)?;
 
     emit_shell(app, ShellProgress::Membooting);
     {
         let mut transport = open_fel()?;
         memboot_ops::init_dram(&mut transport, fes1)?;
-        // DRAM settle after fes1 exec. 5s (vs memboot's 2s) — hardware bring-up
-        // showed marginal devices need longer before the first DRAM write lands.
+        // DRAM settle after fes1 exec. 5s (vs memboot's 2s) — marginal devices
+        // need longer before the first DRAM write lands.
         thread::sleep(Duration::from_millis(5000));
         let padded = boot_img.len().div_ceil(fel::SECTOR_SIZE) * fel::SECTOR_SIZE;
         if padded as u32 > fel::TRANSFER_MAX_SIZE {
@@ -238,29 +239,22 @@ fn run_shell(app: &AppHandle, cache_dir: std::path::PathBuf, command: &str) -> R
     }
 
     emit_shell(app, ShellProgress::WaitingForShell);
-    // Localize failure for the hardware loop. The staged image must first leave
-    // FEL (bulk-IN `0x82` disappears) and then re-present as clovershell (IN
-    // `0x81`). Watching the endpoint splits the old catch-all ShellNotFound into
-    // two distinct signals:
-    //   - still on `0x82` after boota  -> the image never took over: a corrupt
-    //     DRAM upload / failed boota, typically a marginal USB session
-    //     (-> MembootTimeout; retry on a healthy session).
-    //   - left FEL but no `0x81`       -> it booted but clovershell did not come
-    //     up: a cmdline/init problem (-> ShellNotFound from wait_for_clovershell).
+    // Two-phase failure localization:
+    //   - FEL never leaves the bus  -> image didn't boot (corrupt upload /
+    //     failed boota) -> MembootTimeout, retry on a healthy session.
+    //   - FEL left but SSH never reachable -> booted but no network shell
+    //     (host RNDIS NIC unbound, RNDIS down) -> ShellNotFound.
     let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        match dev_bulk_in_ep() {
-            // clovershell is already up, or the FEL stub has left the bus.
-            Some(clovershell::CLV_EP_IN) | None => break,
-            // Still the FEL endpoint after boota: the image did not boot.
-            Some(_) if Instant::now() >= deadline => return Err(RfError::MembootTimeout),
-            _ => thread::sleep(Duration::from_millis(500)),
+    while fel_present() {
+        if Instant::now() >= deadline {
+            return Err(RfError::MembootTimeout);
         }
+        thread::sleep(Duration::from_millis(500));
     }
-    let mut transport = wait_for_clovershell(Duration::from_secs(30))?;
+    netshell::wait_for_ssh(netshell::DEVICE_IP, Duration::from_secs(30))?;
 
     emit_shell(app, ShellProgress::Running);
-    let out = clovershell::exec(&mut transport, command)?;
+    let out = netshell::run_ssh_command(netshell::DEVICE_IP, "root", command)?;
     emit_shell(
         app,
         ShellProgress::Done {
@@ -269,20 +263,6 @@ fn run_shell(app: &AppHandle, cache_dir: std::path::PathBuf, command: &str) -> R
         },
     );
     Ok(())
-}
-
-/// Poll until a clovershell device answers ping, or the deadline passes.
-fn wait_for_clovershell(within: Duration) -> Result<ClovershellTransport, RfError> {
-    let deadline = Instant::now() + within;
-    while Instant::now() < deadline {
-        if let Ok(mut t) = ClovershellTransport::open() {
-            if clovershell::ping(&mut t).is_ok() {
-                return Ok(t);
-            }
-        }
-        thread::sleep(Duration::from_millis(500));
-    }
-    Err(RfError::ShellNotFound)
 }
 
 #[tauri::command]

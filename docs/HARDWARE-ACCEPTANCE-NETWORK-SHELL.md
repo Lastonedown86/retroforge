@@ -51,10 +51,12 @@ Verify reachability (PowerShell):
 2. Run `uname -a`.
 3. Expect Linux/clover kernel string in stdout, exit code 0.
 
-**Status (2026-05-31):** SSH transport PASSED on hardware via the headless
-`run_ssh_command_uname` ignored test (`uname -a` → exit 0 over the real RNDIS
-link). memboot→RNDIS and the `ShellNotFound` localization also verified live.
-Full one-shot UI run pending a stable link window.
+**Status (2026-05-31): PASSED — full one-shot UI acceptance.** A single click of
+"Run `uname -a`" drove memboot → RNDIS → SSH (none-auth) → exit 0, returning
+`Linux madmonkey 3.4.113.29-madmonkey ... armv7l`. Live capture showed FEL leave
+the bus ~9s in, the RNDIS NIC come Up with a `169.254.x` host IP, and `:22`
+reachable, all inside the runner's wait window. memboot, the `ShellNotFound`
+localization, and the headless `run_ssh_command_uname` test were also verified.
 
 ## Recovery
 - A timed-out FEL transfer wedges the FEL state machine — physical RESET replug

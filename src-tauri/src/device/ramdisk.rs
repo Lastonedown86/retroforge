@@ -97,6 +97,16 @@ pub fn cpio_replace(cpio: &[u8], path: &str, new_data: &[u8]) -> Result<Vec<u8>,
     Ok(out)
 }
 
+/// Return the data bytes of the named entry, if present.
+pub fn cpio_read(cpio: &[u8], path: &str) -> Option<Vec<u8>> {
+    for ent in CpioIter::new(cpio) {
+        if ent.name == path {
+            return Some(ent.data.to_vec());
+        }
+    }
+    None
+}
+
 /// Decompress an XZ stream.
 pub fn xz_decompress(data: &[u8]) -> Result<Vec<u8>, RfError> {
     let mut out = Vec::new();
@@ -203,15 +213,5 @@ mod tests {
             xz_decompress(b"not an xz stream at all"),
             Err(RfError::RamdiskError(_))
         ));
-    }
-
-    // Test-only reader used to verify replace output.
-    fn cpio_read(cpio: &[u8], path: &str) -> Option<Vec<u8>> {
-        for ent in CpioIter::new(cpio) {
-            if ent.name == path {
-                return Some(ent.data.to_vec());
-            }
-        }
-        None
     }
 }

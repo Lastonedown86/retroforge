@@ -1,4 +1,5 @@
 use crate::error::RfError;
+use crate::device::{bootimage, ramdisk};
 
 /// Width/height of a PNG, in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +44,30 @@ pub fn validate_png(png: &[u8], expect: PngDims) -> Result<(), RfError> {
         return Err(RfError::BootScreenInvalidPng("interlaced PNG not supported".into()));
     }
     Ok(())
+}
+
+/// Path of the boot logo inside the hakchi ramdisk overlay. Verified against the
+/// real cached hmod (`boot/boot.img` ramdisk): the only PNG asset is
+/// `hakchi/rootfs/etc/hakchi.png` (consumed by `bin/decodepng` at boot).
+const BOOT_PNG_PATH: &str = "hakchi/rootfs/etc/hakchi.png";
+
+/// The current boot.png bytes inside a decompressed ramdisk cpio, if present.
+fn current_boot_png(cpio: &[u8]) -> Option<Vec<u8>> {
+    ramdisk::cpio_read(cpio, BOOT_PNG_PATH)
+}
+
+/// Build a boot image identical to `stock` except its ramdisk's boot.png is
+/// replaced by `new_png`. Validates the PNG against the stock logo's dimensions.
+pub fn build_custom_bootimg(stock: &[u8], new_png: &[u8]) -> Result<Vec<u8>, RfError> {
+    let comp = bootimage::extract_ramdisk(stock)?;
+    let cpio = ramdisk::xz_decompress(&comp)?;
+    let stock_png = current_boot_png(&cpio)
+        .ok_or_else(|| RfError::RamdiskError(format!("{BOOT_PNG_PATH} not in ramdisk")))?;
+    let dims = read_png_dims(&stock_png)?;
+    validate_png(new_png, dims)?;
+    let new_cpio = ramdisk::cpio_replace(&cpio, BOOT_PNG_PATH, new_png)?;
+    let new_comp = ramdisk::xz_compress(&new_cpio)?;
+    bootimage::replace_ramdisk(stock, &new_comp)
 }
 
 #[cfg(test)]
@@ -101,5 +126,81 @@ mod tests {
     #[test]
     fn read_png_dims_rejects_non_png() {
         assert!(read_png_dims(b"not a png").is_err());
+    }
+
+    // Real-asset check: extract boot/boot.img from the cached hmod, swap its
+    // boot.png with a generated same-dims PNG, and assert the rebuilt image
+    // re-extracts a ramdisk whose boot.png is the new bytes. CI-safe (skips
+    // without the env var).
+    //   set RF_HMOD_PATH=%LOCALAPPDATA%\com.retroforge.app\hakchi-latest.hmod
+    //   cargo test --manifest-path src-tauri/Cargo.toml build_custom_bootimg_real -- --ignored --nocapture
+    #[test]
+    #[ignore = "needs the cached hmod; set RF_HMOD_PATH"]
+    fn build_custom_bootimg_real() {
+        let path = std::env::var("RF_HMOD_PATH").expect("set RF_HMOD_PATH");
+        let archive = std::fs::read(&path).expect("read hmod");
+        let stock = crate::device::hmod::extract_entry(&archive, "boot/boot.img")
+            .expect("extract boot/boot.img");
+
+        let ramdisk = crate::device::ramdisk::xz_decompress(
+            &crate::device::bootimage::extract_ramdisk(&stock).unwrap(),
+        )
+        .unwrap();
+        let stock_png = current_boot_png(&ramdisk).expect("stock boot.png present");
+        let dims = read_png_dims(&stock_png).unwrap();
+        let new_png = make_solid_rgba_png(dims);
+
+        let out = build_custom_bootimg(&stock, &new_png).expect("build");
+        let rd2 = crate::device::ramdisk::xz_decompress(
+            &crate::device::bootimage::extract_ramdisk(&out).unwrap(),
+        )
+        .unwrap();
+        let got = current_boot_png(&rd2).expect("new boot.png present");
+        assert_eq!(got, new_png);
+    }
+
+    // Helper: build a valid 8-bit RGBA PNG of the given dims (single zlib IDAT of
+    // filtered rows). Self-contained for the test.
+    fn make_solid_rgba_png(dims: PngDims) -> Vec<u8> {
+        use std::io::Write;
+        fn chunk(out: &mut Vec<u8>, kind: &[u8], data: &[u8]) {
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            let mut crc_in = kind.to_vec();
+            crc_in.extend_from_slice(data);
+            out.extend_from_slice(kind);
+            out.extend_from_slice(data);
+            out.extend_from_slice(&crc32(&crc_in).to_be_bytes());
+        }
+        fn crc32(b: &[u8]) -> u32 {
+            let mut c: u32 = 0xffff_ffff;
+            for &x in b {
+                c ^= x as u32;
+                for _ in 0..8 {
+                    c = if c & 1 != 0 { (c >> 1) ^ 0xedb8_8320 } else { c >> 1 };
+                }
+            }
+            !c
+        }
+        let (w, h) = (dims.width, dims.height);
+        let mut raw = Vec::new();
+        for _ in 0..h {
+            raw.extend_from_slice(&[0u8]); // filter: none
+            for _ in 0..w {
+                raw.extend_from_slice(&[0, 0, 0, 255]); // opaque black RGBA
+            }
+        }
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        z.write_all(&raw).unwrap();
+        let idat = z.finish().unwrap();
+
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&w.to_be_bytes());
+        ihdr.extend_from_slice(&h.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]); // 8-bit, RGBA, no interlace
+        chunk(&mut png, b"IHDR", &ihdr);
+        chunk(&mut png, b"IDAT", &idat);
+        chunk(&mut png, b"IEND", &[]);
+        png
     }
 }

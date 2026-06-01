@@ -25,11 +25,7 @@ pub enum RfError {
     HmodFetchFailed(String),
     #[error("failed to extract from hmod: {0}")]
     HmodExtractFailed(String),
-    #[error("kernel cmdline has no room for the injected token")]
-    CmdlineTooLong,
-    #[error("clovershell protocol error: {0}")]
-    ClovershellProtocol(String),
-    #[error("device shell not found (no clovershell on the bus)")]
+    #[error("device shell unreachable over the network")]
     ShellNotFound,
     #[error("SSH error: {0}")]
     SshError(String),

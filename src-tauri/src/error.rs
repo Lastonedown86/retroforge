@@ -29,6 +29,10 @@ pub enum RfError {
     ShellNotFound,
     #[error("SSH error: {0}")]
     SshError(String),
+    #[error("ramdisk error: {0}")]
+    RamdiskError(String),
+    #[error("invalid boot-screen PNG: {0}")]
+    BootScreenInvalidPng(String),
 }
 
 #[cfg(test)]

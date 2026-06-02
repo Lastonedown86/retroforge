@@ -1,13 +1,14 @@
 # Brick-Safe GPU Memboot Tracer Bullet — Findings
 
-> Records the host-side module-sourcing + vermagic-proof phase for
+> Records the full spike for
 > `docs/superpowers/specs/2026-06-02-gpu-memboot-spike-design.md`.
-> **Host-side outcome: PREBUILT MATCH FOUND** — `mali.ko` + `clovercon.ko`
-> (+ companion `input-polldev.ko`) with the *exact* `3.4.113.29-madmonkey`
-> vermagic were pulled from the **same `hakchi-latest.hmod` archive** that
-> supplies our `boot.img`. On-device `insmod` / render / controller steps are
-> still pending the device (placeholders below). No INCONCLUSIVE /
-> build-from-source branch was needed.
+> **Verdict: PARTIAL — GPU GO, controller is the next task.** vermagic-matched
+> `mali.ko` (+ `clovercon.ko`, `input-polldev.ko`, `evdev.ko`) from the same
+> `hakchi-latest.hmod` that supplies our `boot.img` were `insmod`'d under the
+> live RAM-memboot; RetroArch renders the RGUI menu on HDMI via Mali-400 OpenGL
+> ES 2.0 (user-confirmed). The prior spike's GPU wall (`memboot-no-gpu`) is
+> cleared, brick-safe (zero NAND writes). Controller input does not yet work
+> (clovercon probes but the I2C pad emits no events — needs board/MCU init).
 
 ## Module source + provenance
 
@@ -121,34 +122,116 @@ preempt mod_unload ARMv7`, `Class: ELF32`, `Machine: ARM`. Required criteria met
 (the `con0_i2c_bus, con0_detect_gpio, ...` form) — stock dp-nes values come from
 `/newroot/etc/init.d/S79clovercon`.
 
-## insmod result
+## insmod result — ALL MODULES LOADED CLEAN
 
-*(pending device — RAM-only)* Plan: tar-over-ssh `%TEMP%\mods\*.ko` →
-`/tmp/mods/`, then by full path:
-`insmod /tmp/mods/input-polldev.ko` → `insmod /tmp/mods/mali.ko`
-(expect `/dev/mali`, `lsmod` shows `mali`, no `invalid module format`) →
-`insmod /tmp/mods/clovercon.ko module_params=...` (dp-nes values; expect
-`/dev/input/event*`). `modprobe` is broken on this image (no `modules.dep` for
-`extra/`); `insmod` by full path. **Load order matters:** `input-polldev` before
-`clovercon`.
+Pushed `%TEMP%\mods\*.ko` → `/tmp/mods/` via tar-over-ssh. `insmod` by full path
+(load order `input-polldev` → `mali` → `clovercon`):
 
-## RA gl render
+```
+insmod /tmp/mods/input-polldev.ko   → POLLDEV_OK
+insmod /tmp/mods/mali.ko            → MALI_OK
+insmod /tmp/mods/clovercon.ko module_params=1,195,2,194  → CC_OK   (dp-nes values)
+```
 
-*(pending device)* Re-run staged RA (`/tmp/ra`) on `video_driver=gl`; expect the
-Mali EGL surface to succeed (no `EGL_BAD_ALLOC`) and RGUI to render on HDMI.
+`lsmod`:
+```
+clovercon        8805  0
+mali           115993  0
+input_polldev    2042  1 clovercon
+```
 
-## Controller
+dmesg (the win — contrast the prior spike's `invalid module format`):
+```
+Get mali parameter successfully
+Init Mali gpu successfully
+Mali: Mali device driver loaded
+added device for controller 1
+input: Nintendo Clovercon - controller1 as /devices/platform/twi.1/i2c-1/1-0052/input/input2
+probed controller 1
+```
 
-*(pending device)* After `clovercon.ko` loads with the dp-nes params, press
-D-pad / A-B and confirm RGUI navigates.
+`/dev/mali` (char 10,52) created. **No vermagic error** — the same-archive
+modules matched the running kernel exactly, as predicted.
 
-## Verdict (pending device)
+**Extra module the plan didn't anticipate — `evdev.ko`.** clovercon registered an
+input device (`input2`) but `/proc/bus/input/handlers` had only `kbd` +
+`ddrfreq_dsm` — **no `evdev` handler**, so no `/dev/input/event*` node was
+created and RetroArch's joypad driver saw nothing. `evdev` is a loadable module
+in the same hmod (`kernel/drivers/input/evdev.ko`, vermagic-matched). After
+`insmod /tmp/mods/evdev.ko`: handler `evdev Minor=64` appeared and
+`/dev/input/event0,1,24` were created — the Clovercon maps to **`event24`**
+(`/proc/bus/input/devices`: `Handlers=event24`). (The full hmod input tree also
+ships `joydev.ko`? no — but `mousedev.ko`, `uinput.ko`, `joystick/xpad.ko`,
+`ff-memless.ko` etc. are there if ever needed.)
 
-**Host-side: PREBUILT PATH SUCCEEDED.** A vermagic-exact, same-archive,
-CRC-safe `mali.ko` + `clovercon.ko` (+ `input-polldev.ko` companion) were
-sourced from the identical `hakchi-latest.hmod` that supplies our `boot.img` and
-verified ARM/ELF32 with the exact `3.4.113.29-madmonkey` vermagic by two methods.
-The spec's INCONCLUSIVE → build-from-source fallback was **not** required.
+## RA gl render — GO (renders on HDMI via Mali GLES2)
 
-Final GO / PARTIAL / NO-GO awaits the on-device `insmod` + RA `gl` render +
-controller-navigation run (the three placeholder sections above).
+Re-ran staged RA (`/tmp/ra`) on stock `video_driver=gl`. The Mali EGL surface
+now succeeds — `EGL_BAD_ALLOC` is gone:
+
+```
+[EGL]: EGL version: 1.4
+[GL]: Found GL context: mali-fbdev
+[GL]: Vendor: ARM, Renderer: Mali-400 MP
+[GL]: Version: OpenGL ES 2.0
+[GL]: Using resolution 1280x720
+[Shader driver]: Using GLSL shader backend
+[EGL]: eglSwapInterval(1)         ← actively swapping frames
+```
+
+**User confirmed on HDMI: the RetroArch RGUI menu is displayed.** The GPU wall
+from the prior spike (`memboot-no-gpu`) is **cleared** under a brick-safe,
+RAM-only memboot.
+
+## Controller — NOT WORKING (kernel-level dead; needs board init)
+
+clovercon loads and `probed controller 1`, the pad maps to `event24`, RA was
+switched to the `linuxraw` joypad driver (the `udev` driver needs `udevd`, which
+this memboot lacks). But:
+
+- Raw capture: `timeout 20 cat /dev/input/event24` while the user mashed every
+  button → **0 bytes**. The controller emits nothing at the kernel level.
+- dmesg: `twi1 has no twi_regulator`; `/dev/i2c*` absent (no `i2c-dev`);
+  **`clover-mcp` present (`/newroot/usr/bin/clover-mcp`) but NOT running.**
+
+The NES Classic pad is an I2C (Wii-style) device at `i2c-1/1-0052`. clovercon
+probes it, but the port delivers no data — the bare memboot skips the board
+bring-up stock boot does (notably **`clover-mcp`**, the onboard-MCU manager that
+powers/enables the controller ports, and the twi1 regulator). This is a deeper
+hardware-init gap, not an RA-config issue.
+
+## Verdict — PARTIAL (GPU **GO**; controller is the next task)
+
+**The spike's core question — can a graphical RetroArch run under a brick-safe,
+non-persistent RAM-memboot? — is answered YES.** `mali.ko` + companions
+`insmod`'d from the same `hakchi-latest.hmod` clear the GPU wall; RA renders the
+RGUI menu on HDMI via Mali-400 OpenGL ES 2.0. **Zero NAND writes**; power-cycle
+returns the unit to bone-stock. This unblocks the dashboard initiative on the
+RAM-only path the user requires.
+
+**PARTIAL** only because controller input does not yet work: clovercon (+ evdev)
+load and the device probes, but the I2C pad emits no events — the memboot is
+missing stock boot's port/MCU bring-up.
+
+**Recommended next task (its own cycle):** controller bring-up under memboot —
+investigate running/replicating `clover-mcp` (MCU port power) and the twi1
+regulator init so `event24` actually emits, then re-test RGUI navigation. All
+still RAM-only / brick-safe.
+
+**Module set proven loadable under memboot (RAM-only):** `input-polldev.ko`,
+`mali.ko`, `clovercon.ko` (params `1,195,2,194` for dp-nes), `evdev.ko` — all
+vermagic `3.4.113.29-madmonkey`, all from `hakchi-latest.hmod`.
+
+### Appendix — working device sequence (RAM-only, brick-safe)
+```sh
+# (modules staged at /tmp/mods via tar-over-ssh; RA staged at /tmp/ra)
+insmod /tmp/mods/input-polldev.ko
+insmod /tmp/mods/mali.ko
+insmod /tmp/mods/clovercon.ko module_params=1,195,2,194
+insmod /tmp/mods/evdev.ko                      # creates /dev/input/event* (Clovercon=event24)
+setsid env HOME=/tmp/ra/etc/libretro LD_LIBRARY_PATH=/usr/lib \
+  /tmp/ra/bin/retroarch -c /tmp/ra/etc/libretro/retroarch.cfg \
+  --appendconfig /tmp/ra-input.cfg -v </dev/null >/tmp/ra.log 2>&1 &
+#   /tmp/ra-input.cfg: input_joypad_driver = "linuxraw"  (udevd absent)
+# → RGUI renders via Mali GLES2 @1280x720. Controller: event24 emits 0 bytes (next task).
+```

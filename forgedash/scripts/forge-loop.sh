@@ -24,6 +24,8 @@ while true; do
             -L "$RA_ROOT/etc/libretro/core/${CORE}_libretro.so" \
             "$FORGE_ROOT/$ROM" \
             </dev/null >"$FORGE_ROOT/ra.log" 2>&1
+        RA_STATUS=$?
+        [ "$RA_STATUS" -ne 0 ] && echo "$RA_STATUS" > "$FORGE_ROOT/ra_exit"
         # RA exits (user picked Quit RetroArch); loop relaunches the dashboard.
     else
         # Dashboard quit without a selection -> exit the loop.

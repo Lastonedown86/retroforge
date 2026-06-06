@@ -7,8 +7,6 @@ edition = "2021"
 forgedash-core = { path = "../core" }
 sdl2 = "0.37"
 glow = "0.14"
-image = { version = "0.25", default-features = false, features = ["png"] }
-fontdue = "0.9"
 
 [features]
 default = []

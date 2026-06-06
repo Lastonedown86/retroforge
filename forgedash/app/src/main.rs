@@ -23,7 +23,10 @@ fn main() {
         }
     };
 
-    let mut plat = platform::Platform::new(1280, 720).expect("platform init");
+    let mut plat = platform::Platform::new(1280, 720).unwrap_or_else(|e| {
+        eprintln!("forgedash: EGL/platform init failed: {e}");
+        std::process::exit(1);
+    });
     let font = include_bytes!("../assets/font.ttf");
     let r = gfx::Renderer::new(&plat.gl, plat.width, plat.height, font);
 
@@ -36,6 +39,21 @@ fn main() {
         metas.push(r.text_texture(&plat.gl, &format!("{} · {} · {}", g.year, g.publisher, g.players), 22.0));
         covers.push(gfx::Texture::from_png(&plat.gl, &g.cover_path));
     }
+
+    // No-controller on-screen hint.
+    let no_pad_hint = if !plat.controller_present {
+        Some(r.text_texture(&plat.gl, "No controller detected — keyboard only", 22.0))
+    } else {
+        None
+    };
+
+    // RA reported a non-zero exit on the previous launch -> show a brief toast.
+    let ra_exit_path = Path::new("/tmp/forge/ra_exit");
+    let ra_toast = std::fs::read_to_string(ra_exit_path).ok().map(|s| {
+        let _ = std::fs::remove_file(ra_exit_path);
+        r.text_texture(&plat.gl, &format!("RetroArch exited with code {}", s.trim()), 22.0)
+    });
+    let mut frame: u32 = 0;
 
     let mut shelf = ui::Shelf::new(lib.games.len());
     let mut anim_pos = 0.0f32; // animated selected index
@@ -54,6 +72,7 @@ fn main() {
             }
             platform::Nav::None => {}
         }
+        frame += 1;
 
         // ease the animated index toward the selection
         let target = shelf.selected as f32;
@@ -68,6 +87,15 @@ fn main() {
         }
         r.begin(&plat.gl);
 
+        if let Some(h) = &no_pad_hint {
+            r.draw_texture(&plat.gl, h, 40.0, 40.0, h.w as f32, h.h as f32, 0.85);
+        }
+        if frame < 180 {
+            if let Some(t) = &ra_toast {
+                r.draw_texture(&plat.gl, t, 40.0, 80.0, t.w as f32, t.h as f32, 0.9);
+            }
+        }
+
         // glow behind the center cover (modern-dark theme accent)
         r.fill_rect(&plat.gl, CENTER_X - 200.0, CENTER_Y - 240.0, 400.0, 480.0, [0.23, 0.51, 0.96, 0.18]);
 
@@ -76,7 +104,7 @@ fn main() {
         order.sort_by(|&a, &b| {
             let da = (a as f32 - anim_pos).abs();
             let db = (b as f32 - anim_pos).abs();
-            db.partial_cmp(&da).unwrap()
+            db.partial_cmp(&da).unwrap_or(std::cmp::Ordering::Equal)
         });
         for &i in &order {
             let offset = i as f32 - anim_pos;

@@ -18,6 +18,7 @@ pub struct Platform {
     _controller: Option<sdl2::controller::GameController>,
     pub width: u32,
     pub height: u32,
+    pub controller_present: bool,
 }
 
 impl Platform {
@@ -50,6 +51,7 @@ impl Platform {
         if controller.is_none() {
             eprintln!("forgedash: no controller detected (keyboard nav only)");
         }
+        let controller_present = controller.is_some();
 
         let event_pump = sdl.event_pump()?;
 
@@ -63,6 +65,7 @@ impl Platform {
             _controller: controller,
             width,
             height,
+            controller_present,
         })
     }
 

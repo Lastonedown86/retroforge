@@ -33,9 +33,12 @@ impl PadMap {
 /// in-game hotkeys (Select held = enable_hotkey). Appended via `--appendconfig`.
 pub fn ra_override_cfg(pad: &PadMap) -> String {
     format!(
+        // menu_driver "null" segfaults RetroArch 1.7.0 when starting content (HW-confirmed
+        // on dp-nes); "rgui" runs, and the NES pad can't reach the menu-toggle (autoconf
+        // maps it to "Home", absent on the pad) so RGUI is effectively invisible/unreachable.
         "input_joypad_driver = \"udev\"\n\
          input_driver = \"udev\"\n\
-         menu_driver = \"null\"\n\
+         menu_driver = \"rgui\"\n\
          fps_show = \"false\"\n\
          menu_enable_widgets = \"false\"\n\
          menu_show_load_content_animation = \"false\"\n\
@@ -72,7 +75,7 @@ mod tests {
     #[test]
     fn override_has_headless_and_clovercon_hotkeys() {
         let c = ra_override_cfg(&PadMap::clovercon());
-        assert!(c.contains("menu_driver = \"null\""));
+        assert!(c.contains("menu_driver = \"rgui\""));
         assert!(c.contains("input_joypad_driver = \"udev\""));
         assert!(c.contains("input_driver = \"udev\""));
         assert!(c.contains("fps_show = \"false\""));

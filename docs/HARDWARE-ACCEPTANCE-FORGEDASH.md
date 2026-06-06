@@ -1,5 +1,11 @@
 # Hardware Acceptance — ForgeDash Tracer Bullet
 
+> **STATUS: HW-PASSED 2026-06-06** on NES Classic `dp-nes` — every step below
+> green, zero NAND writes. Build recipe + toolchain saga + controller codes in
+> `docs/superpowers/findings/2026-06-06-forgedash-hw.md`. Build via
+> `forgedash/dockerbuild.sh` (Linaro GCC 4.9 / glibc 2.21; zig + modern cross-gcc
+> both failed against the device's Buildroot glibc 2.22).
+
 Device: NES Classic (`dp-nes`). All steps RAM-only (brick-safe). Power-cycle =
 bone stock. This proves the custom dashboard spine: our own Rust + GLES2 binary
 gets a Mali surface, navigates by pad, and launches ROMs into RetroArch.

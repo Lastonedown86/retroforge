@@ -1,4 +1,8 @@
-/// Abstract navigation events, mapped from both keyboard (dev) and controller (device).
+use std::fs::File;
+use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
+
+/// Abstract navigation events, mapped from keyboard (dev) and the raw evdev pad (device).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Nav {
     None,
@@ -8,14 +12,21 @@ pub enum Nav {
     Quit,
 }
 
+// Linux evdev: EV_KEY type + Clovercon button codes (learned on-device via evtest).
+const EV_KEY: u16 = 1;
+const CODE_A: u16 = 304; // BTN_SOUTH
+const CODE_LEFT: u16 = 704; // clovercon d-pad left  (BTN_TRIGGER_HAPPY1)
+const CODE_RIGHT: u16 = 705; // clovercon d-pad right (BTN_TRIGGER_HAPPY2)
+const O_NONBLOCK: i32 = 0o4000;
+
 pub struct Platform {
     _sdl: sdl2::Sdl,
     window: sdl2::video::Window,
     _gl_ctx: sdl2::video::GLContext,
     pub gl: glow::Context,
     event_pump: sdl2::EventPump,
-    _controller_sys: sdl2::GameControllerSubsystem,
-    _controller: Option<sdl2::controller::GameController>,
+    /// Raw evdev fd for the pad; SDL's joystick layer doesn't enumerate the Clovercon.
+    pad: Option<File>,
     pub width: u32,
     pub height: u32,
     pub controller_present: bool,
@@ -45,15 +56,20 @@ impl Platform {
             glow::Context::from_loader_function(|s| video.gl_get_proc_address(s) as *const _)
         };
 
-        let controller_sys = sdl.game_controller()?;
-        let n = controller_sys.num_joysticks().unwrap_or(0);
-        let controller = (0..n).find_map(|i| controller_sys.open(i).ok());
-        if controller.is_none() {
-            eprintln!("forgedash: no controller detected (keyboard nav only)");
-        }
-        let controller_present = controller.is_some();
-
         let event_pump = sdl.event_pump()?;
+
+        // Open the pad as a raw non-blocking evdev device (default event24; override via FORGE_PAD).
+        let pad_path =
+            std::env::var("FORGE_PAD").unwrap_or_else(|_| "/dev/input/event24".to_string());
+        let pad = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(O_NONBLOCK)
+            .open(&pad_path)
+            .ok();
+        if pad.is_none() {
+            eprintln!("forgedash: no controller at {pad_path} (keyboard nav only)");
+        }
+        let controller_present = pad.is_some();
 
         Ok(Platform {
             _sdl: sdl,
@@ -61,17 +77,15 @@ impl Platform {
             _gl_ctx: gl_ctx,
             gl,
             event_pump,
-            _controller_sys: controller_sys,
-            _controller: controller,
+            pad,
             width,
             height,
             controller_present,
         })
     }
 
-    /// Drain the event queue, returning the first meaningful nav event this frame.
+    /// Drain SDL events (keyboard/window) + raw evdev pad events; return the first nav this frame.
     pub fn poll(&mut self) -> Nav {
-        use sdl2::controller::Button;
         use sdl2::event::Event;
         use sdl2::keyboard::Keycode;
 
@@ -86,15 +100,28 @@ impl Platform {
                     Keycode::Escape => return Nav::Quit,
                     _ => {}
                 },
-                Event::ControllerButtonDown { button, .. } => match button {
-                    Button::DPadLeft => result = Nav::Left,
-                    Button::DPadRight => result = Nav::Right,
-                    Button::A => result = Nav::Confirm,
-                    _ => {}
-                },
                 _ => {}
             }
         }
+
+        // Raw evdev: input_event is 16 bytes on 32-bit ARM (timeval=8, type=2, code=2, value=4).
+        if let Some(pad) = self.pad.as_mut() {
+            let mut buf = [0u8; 16];
+            while let Ok(16) = pad.read(&mut buf) {
+                let etype = u16::from_ne_bytes([buf[8], buf[9]]);
+                let code = u16::from_ne_bytes([buf[10], buf[11]]);
+                let value = i32::from_ne_bytes([buf[12], buf[13], buf[14], buf[15]]);
+                if etype == EV_KEY && value == 1 {
+                    match code {
+                        CODE_LEFT => result = Nav::Left,
+                        CODE_RIGHT => result = Nav::Right,
+                        CODE_A => result = Nav::Confirm,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
         result
     }
 

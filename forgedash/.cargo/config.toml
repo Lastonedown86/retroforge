@@ -1,0 +1,8 @@
+# Device cross build: run from the forgedash/ directory:
+#   cargo build -p forgedash --release --target armv7-unknown-linux-gnueabihf
+# Requires: rustup target add armv7-unknown-linux-gnueabihf, an
+# arm-linux-gnueabihf gcc cross toolchain, and a ./sysroot populated from the
+# device's own /usr/lib (see scripts/stage.sh notes + the plan).
+[target.armv7-unknown-linux-gnueabihf]
+linker = "arm-linux-gnueabihf-gcc"
+rustflags = ["-C", "link-arg=--sysroot=sysroot", "-L", "sysroot/usr/lib"]

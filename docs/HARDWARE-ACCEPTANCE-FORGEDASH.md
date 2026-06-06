@@ -88,7 +88,11 @@ If RA errors on `menu_driver = "null"` (check `/tmp/forge/ra.log`): fallback is 
 set `menu_driver = "rgui"` in `ra_override_cfg` (RGUI present but never opened; the
 exit hotkey still works). Re-build + re-test.
 
-## Save-state browser slice acceptance (slice 3)
+## Save-state browser slice acceptance (slice 3) — HW-PASSED 2026-06-06
+
+> PASS on dp-nes: D-pad Up opens the per-game save-state screen (list + preview),
+> Up/Down navigates, A resumes a slot, Select→A deletes (B cancels), B returns;
+> new saves show thumbnails. Zero NAND writes.
 
 Build `forgedash/dockerbuild.sh`; push the new `forgedash` binary to `/tmp/forge`
 (forge-loop.sh unchanged). ForgeDash now also writes `savestate_thumbnail_enable`

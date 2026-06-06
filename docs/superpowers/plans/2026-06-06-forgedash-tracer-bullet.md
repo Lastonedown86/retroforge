@@ -51,9 +51,17 @@ Files that change together live together.
 | Task | Crate / files | Verify with |
 |---|---|---|
 | 1 model, 2–3 ui, 4 launch | `core/src/*` (declared in `core/src/lib.rs`) | `cargo test -p forgedash-core <filter>` — **runs in this env** |
-| 5 platform, 6 gfx, 7 main | `app/src/*` | `cargo build -p forgedash --features bundled` then run — **needs CMake + C compiler (VS Build Tools); deferred if absent** |
+| 6 gfx | `core/src/gfx.rs` (pure Rust: glow/image/fontdue) | `cargo build -p forgedash-core` — **type-checks in this env** (catches glow API drift) |
+| 5 platform, 7 main | `app/src/*` | `cargo build -p forgedash --features bundled` then run — **needs CMake + C compiler (VS Build Tools); deferred if absent** |
 | 8 cross + scripts | `app/.cargo/`, `scripts/` | `cargo build -p forgedash --release --target armv7-unknown-linux-gnueabihf` — **needs ARM toolchain + device sysroot; deferred** |
 | 9 runbook | `docs/` | doc only |
+
+**gfx lives in `core`** (not `app`): it only needs `glow`/`image`/`fontdue`,
+all pure Rust, so it compiles in this env. Add to `forgedash/core/Cargo.toml`:
+`glow = "0.14"`, `image = { version = "0.25", default-features = false, features = ["png"] }`,
+`fontdue = "0.9"`; and `pub mod gfx;` in `core/src/lib.rs`. The app's `main.rs`
+uses it via `use forgedash_core::gfx;` and passes the `glow::Context` (created by
+`platform.rs` from SDL) into the renderer.
 
 - In `app/src/main.rs`, import core via `use forgedash_core::{model, ui, launch};`
   (crate name `forgedash-core` → path `forgedash_core`). Where later task code

@@ -61,7 +61,13 @@ reset-to-menu, and the persistent NAND-install boot path (backup-gated, ADR-0003
 - **OES_vertex_array_object** — the renderer was written VAO-free (pure GLES2) to
   avoid this dependency; confirm quads render regardless.
 
-## Headless-RA slice acceptance (slice 2)
+## Headless-RA slice acceptance (slice 2) — HW-PASSED 2026-06-06
+
+> PASS on dp-nes: game launches with no visible RGUI, Select+Start returns to
+> ForgeDash, Select+A/B save/load + Select+←/→ slot all work with toasts, zero
+> NAND writes. **Note:** `menu_driver="null"` segfaults RA 1.7.0 at content
+> start — use `menu_driver="rgui"` (it stays unreachable on the NES pad: the
+> menu-toggle maps to "Home", which the pad lacks). Fixed in `ra_override_cfg`.
 
 Build: `docker run --rm -v <repo>:/work -w /work forgedash-build bash /work/forgedash/dockerbuild.sh`.
 Stage: push the new `forgedash` binary + `forge-loop.sh` to `/tmp/forge` (see

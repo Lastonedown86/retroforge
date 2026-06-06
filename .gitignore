@@ -17,3 +17,6 @@ dist-ssr
 
 # Cached runtime boot blobs (downloaded hakchi hmod)
 *.hmod
+
+# Brainstorming visual companion mockups
+.superpowers/

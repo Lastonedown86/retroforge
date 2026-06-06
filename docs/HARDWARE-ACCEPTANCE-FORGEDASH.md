@@ -60,3 +60,30 @@ reset-to-menu, and the persistent NAND-install boot path (backup-gated, ADR-0003
   Mali EGL path, but our binary requesting it directly is first proven here.
 - **OES_vertex_array_object** — the renderer was written VAO-free (pure GLES2) to
   avoid this dependency; confirm quads render regardless.
+
+## Headless-RA slice acceptance (slice 2) — HW-PASSED 2026-06-06
+
+> PASS on dp-nes: game launches with no visible RGUI, Select+Start returns to
+> ForgeDash, Select+A/B save/load + Select+←/→ slot all work with toasts, zero
+> NAND writes. **Note:** `menu_driver="null"` segfaults RA 1.7.0 at content
+> start — use `menu_driver="rgui"` (it stays unreachable on the NES pad: the
+> menu-toggle maps to "Home", which the pad lacks). Fixed in `ra_override_cfg`.
+
+Build: `docker run --rm -v <repo>:/work -w /work forgedash-build bash /work/forgedash/dockerbuild.sh`.
+Stage: push the new `forgedash` binary + `forge-loop.sh` to `/tmp/forge` (see
+`scripts/stage.sh` / the prior runbook). No need to stage `/tmp/ra-input.cfg` any
+more — ForgeDash writes `/tmp/forge/ra-override.cfg` itself on launch.
+
+Run `sh /tmp/forge/forge-loop.sh`, then on the controller:
+
+- [ ] Launch a game (A) → **RetroArch shows NO menu** at any point (no RGUI).
+- [ ] **Select+Start → returns to ForgeDash** (verify this FIRST — it is the only
+      way out; if the exit bind is wrong, power-cycle to recover).
+- [ ] Select+A → save state; brief toast appears.
+- [ ] Select+B → load state; the save is restored; toast appears.
+- [ ] Select+Right / Select+Left → save slot changes; toast shows the slot.
+- [ ] Power-cycle → device boots bone stock (zero NAND writes).
+
+If RA errors on `menu_driver = "null"` (check `/tmp/forge/ra.log`): fallback is to
+set `menu_driver = "rgui"` in `ra_override_cfg` (RGUI present but never opened; the
+exit hotkey still works). Re-build + re-test.

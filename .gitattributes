@@ -1,0 +1,2 @@
+# Shell scripts must stay LF — they run on the device BusyBox shell and in Linux build containers; CRLF breaks them.
+*.sh text eol=lf

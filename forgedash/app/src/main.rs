@@ -66,6 +66,8 @@ fn main() {
             platform::Nav::Right => shelf.move_right(),
             platform::Nav::Confirm => {
                 let g = &lib.games[shelf.selected];
+                // ForgeDash owns RA's runtime config: headless + in-game hotkeys.
+                let _ = launch::write_ra_override(handoff_dir, &launch::PadMap::clovercon());
                 let _ = launch::write_handoff(handoff_dir, &g.rom_path, &g.core);
                 println!("launching {} ({})", g.title, g.core);
                 break; // forge-loop.sh takes over from here

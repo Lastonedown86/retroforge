@@ -9,7 +9,7 @@ pub struct Texture {
 pub struct Renderer {
     program: glow::Program,
     vbo: glow::Buffer,
-    vao: glow::VertexArray,
+    a_pos: u32,
     u_screen: glow::UniformLocation,
     u_rect: glow::UniformLocation,
     u_color: glow::UniformLocation,
@@ -70,14 +70,10 @@ impl Renderer {
                 0.0, 0.0, 1.0, 0.0, 1.0, 1.0,
                 0.0, 0.0, 1.0, 1.0, 0.0, 1.0,
             ];
-            let vao = gl.create_vertex_array().unwrap();
-            gl.bind_vertex_array(Some(vao));
             let vbo = gl.create_buffer().unwrap();
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes_of(&verts), glow::STATIC_DRAW);
-            let loc = gl.get_attrib_location(program, "a_pos").unwrap();
-            gl.enable_vertex_attrib_array(loc);
-            gl.vertex_attrib_pointer_f32(loc, 2, glow::FLOAT, false, 0, 0);
+            let a_pos = gl.get_attrib_location(program, "a_pos").unwrap();
 
             gl.enable(glow::BLEND);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
@@ -91,7 +87,7 @@ impl Renderer {
                 .expect("font load");
 
             Renderer {
-                program, vbo, vao, u_screen, u_rect, u_color, u_use_tex,
+                program, vbo, a_pos, u_screen, u_rect, u_color, u_use_tex,
                 font, screen_w: screen_w as f32, screen_h: screen_h as f32,
             }
         }
@@ -100,8 +96,9 @@ impl Renderer {
     pub fn begin(&self, gl: &glow::Context) {
         unsafe {
             gl.use_program(Some(self.program));
-            gl.bind_vertex_array(Some(self.vao));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            gl.enable_vertex_attrib_array(self.a_pos);
+            gl.vertex_attrib_pointer_f32(self.a_pos, 2, glow::FLOAT, false, 0, 0);
             gl.uniform_2_f32(Some(&self.u_screen), self.screen_w, self.screen_h);
         }
     }

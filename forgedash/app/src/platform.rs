@@ -8,15 +8,23 @@ pub enum Nav {
     None,
     Left,
     Right,
+    Up,
+    Down,
     Confirm,
+    Back,
+    Delete,
     Quit,
 }
 
 // Linux evdev: EV_KEY type + Clovercon button codes (learned on-device via evtest).
 const EV_KEY: u16 = 1;
-const CODE_A: u16 = 304; // BTN_SOUTH
-const CODE_LEFT: u16 = 704; // clovercon d-pad left  (BTN_TRIGGER_HAPPY1)
-const CODE_RIGHT: u16 = 705; // clovercon d-pad right (BTN_TRIGGER_HAPPY2)
+const CODE_A: u16 = 304; // BTN_SOUTH   -> Confirm
+const CODE_B: u16 = 305; // BTN_EAST    -> Back
+const CODE_SELECT: u16 = 314; // BTN_SELECT -> Delete
+const CODE_LEFT: u16 = 704; // d-pad left
+const CODE_RIGHT: u16 = 705; // d-pad right
+const CODE_UP: u16 = 706; // d-pad up
+const CODE_DOWN: u16 = 707; // d-pad down
 const O_NONBLOCK: i32 = 0o4000;
 
 pub struct Platform {
@@ -96,7 +104,11 @@ impl Platform {
                 Event::KeyDown { keycode: Some(k), .. } => match k {
                     Keycode::Left => result = Nav::Left,
                     Keycode::Right => result = Nav::Right,
+                    Keycode::Up => result = Nav::Up,
+                    Keycode::Down => result = Nav::Down,
                     Keycode::Return | Keycode::Space => result = Nav::Confirm,
+                    Keycode::Backspace => result = Nav::Back,
+                    Keycode::Delete => result = Nav::Delete,
                     Keycode::Escape => return Nav::Quit,
                     _ => {}
                 },
@@ -115,7 +127,11 @@ impl Platform {
                     match code {
                         CODE_LEFT => result = Nav::Left,
                         CODE_RIGHT => result = Nav::Right,
+                        CODE_UP => result = Nav::Up,
+                        CODE_DOWN => result = Nav::Down,
                         CODE_A => result = Nav::Confirm,
+                        CODE_B => result = Nav::Back,
+                        CODE_SELECT => result = Nav::Delete,
                         _ => {}
                     }
                 }

@@ -135,10 +135,8 @@ dependencies = [
 name = "forgedash"
 version = "0.1.0"
 dependencies = [
- "fontdue",
  "forgedash-core",
  "glow",
- "image",
  "sdl2",
 ]
 

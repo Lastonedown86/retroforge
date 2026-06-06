@@ -81,6 +81,19 @@ on-device with a tiny `evtest.c`:
   into `/tmp/forge/roms/` so relative paths resolve.
 - Run via `forge-loop.sh` (shell-loop: ForgeDash → handoff → RA → relaunch).
 
+## Product direction (decided 2026-06-06)
+
+**Limit RetroArch UI as much as possible — ideally zero visible.** RA stays the
+invisible emulation engine; ForgeDash is the entire player-facing UI. Path:
+- Launch RA with `menu_driver = "null"` + direct exit-combo hotkey (no RGUI).
+- Bubble RA's menu items up into ForgeDash, driving RA via its config + on-disk
+  artifacts (the "API"): `<game>.opt` (core options), shader/video cfg, `.rmp`
+  (remap), `.cht` (cheats), and a ForgeDash save-state browser over RA's `.state`
+  files. In-game quick actions (save/load/reset/exit) = RA pad hotkeys, no menu.
+- Hard HW limit: no second GLES app can overlay the running game (single Mali EGL
+  surface), so a *drawn* mid-game ForgeDash overlay isn't feasible — replace RGUI
+  everywhere except (optionally) an in-game overlay, which stays RA's job.
+
 ## Follow-ups (not blockers)
 
 - Productize: drive the memboot GPU+pad bring-up + ForgeDash staging from the

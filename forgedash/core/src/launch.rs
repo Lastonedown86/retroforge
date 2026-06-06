@@ -42,6 +42,7 @@ pub fn ra_override_cfg(pad: &PadMap) -> String {
          fps_show = \"false\"\n\
          menu_enable_widgets = \"false\"\n\
          menu_show_load_content_animation = \"false\"\n\
+         savestate_thumbnail_enable = \"true\"\n\
          input_enable_hotkey_btn = \"{hk}\"\n\
          input_exit_emulator_btn = \"{exit}\"\n\
          input_save_state_btn = \"{save}\"\n\
@@ -79,6 +80,7 @@ mod tests {
         assert!(c.contains("input_joypad_driver = \"udev\""));
         assert!(c.contains("input_driver = \"udev\""));
         assert!(c.contains("fps_show = \"false\""));
+        assert!(c.contains("savestate_thumbnail_enable = \"true\""));
         assert!(c.contains("input_enable_hotkey_btn = \"8\""));   // Select
         assert!(c.contains("input_exit_emulator_btn = \"9\""));   // Start
         assert!(c.contains("input_save_state_btn = \"0\""));      // A

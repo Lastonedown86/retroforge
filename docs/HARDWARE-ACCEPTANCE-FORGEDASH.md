@@ -87,3 +87,19 @@ Run `sh /tmp/forge/forge-loop.sh`, then on the controller:
 If RA errors on `menu_driver = "null"` (check `/tmp/forge/ra.log`): fallback is to
 set `menu_driver = "rgui"` in `ra_override_cfg` (RGUI present but never opened; the
 exit hotkey still works). Re-build + re-test.
+
+## Save-state browser slice acceptance (slice 3)
+
+Build `forgedash/dockerbuild.sh`; push the new `forgedash` binary to `/tmp/forge`
+(forge-loop.sh unchanged). ForgeDash now also writes `savestate_thumbnail_enable`
+into `ra-override.cfg`, so save states made from this build get `.png` thumbnails.
+
+- [ ] In a game: Select+A save once or twice; Select+Start exit.
+- [ ] Coverflow: highlight that game, press D-pad Up -> save-state screen opens
+      (title "<game> - Save States", slot list left, preview right).
+- [ ] Saves made from this build show a thumbnail; older saves show the placeholder.
+- [ ] Up/Down moves the highlight; preview updates to the highlighted slot.
+- [ ] A on an existing slot -> game launches and resumes that state.
+- [ ] Select on an existing slot -> red confirm bar; A confirms (slot gone on
+      re-open), B cancels.
+- [ ] B -> back to the coverflow. Power-cycle -> bone stock (zero NAND writes).

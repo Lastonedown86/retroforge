@@ -1,0 +1,18 @@
+# Cross-build is driven by forgedash/dockerbuild.sh (HW-PROVEN recipe), NOT by
+# settings here — the linker + rustflags are passed as target-scoped env vars so
+# they don't leak into host build scripts. Summary of what works on the NES
+# Classic (Allwinner R16, Buildroot glibc 2.22, ld-2.22):
+#
+#   - Toolchain: Linaro GCC 4.9-2016.02 (glibc 2.21, < device 2.22 = forward-compat).
+#     zig/cargo-zigbuild produced relocations the device's ld-2.22 segfaults on;
+#     Debian's modern cross-gcc pulled GLIBC_2.28+ refs (too new). Linaro 4.9 = OK.
+#   - Link the device's own libSDL2/libMali from ./sysroot (untarred from devroot.tar).
+#   - sdl_stubs.o satisfies macOS-only SDL_Metal_* symbols the old libSDL2 lacks.
+#   - Input: SDL's joystick layer sees 0 devices; ForgeDash reads /dev/input/event24
+#     raw (evdev) instead. See app/src/platform.rs.
+#
+# Build:  docker build -f Dockerfile.build -t forgedash-build forgedash/
+#         docker run --rm -v <repo>:/work -w /work forgedash-build bash /work/forgedash/dockerbuild.sh
+#
+# This file is intentionally left without a [target.*] linker/rustflags block so a
+# plain `cargo build` for the host (tests) is unaffected.

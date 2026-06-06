@@ -5,6 +5,7 @@ dist/
 
 # Rust / Tauri
 src-tauri/target/
+forgedash/target/
 
 # Editor / OS
 .DS_Store
@@ -17,3 +18,14 @@ dist-ssr
 
 # Cached runtime boot blobs (downloaded hakchi hmod)
 *.hmod
+
+# Brainstorming visual companion mockups
+.superpowers/
+
+# ForgeDash cross-build scratch (regenerable)
+forgedash/devroot.tar
+forgedash/sysroot/
+forgedash/*.o
+forgedash/hello*
+!forgedash/hello.c
+forgedash/evtest

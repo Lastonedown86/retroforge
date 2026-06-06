@@ -17,10 +17,12 @@ while true; do
     if [ -f "$HANDOFF" ]; then
         CORE=$(cut -f1 "$HANDOFF")
         ROM=$(cut -f2 "$HANDOFF")
+        APPEND=""
+        [ -f "$FORGE_ROOT/ra-override.cfg" ] && APPEND="--appendconfig $FORGE_ROOT/ra-override.cfg"
         setsid env HOME="$RA_ROOT/etc/libretro" LD_LIBRARY_PATH=/usr/lib \
             "$RA_ROOT/bin/retroarch" \
             -c "$RA_ROOT/etc/libretro/retroarch.cfg" \
-            --appendconfig /tmp/ra-input.cfg \
+            $APPEND \
             -L "$RA_ROOT/etc/libretro/core/${CORE}_libretro.so" \
             "$FORGE_ROOT/$ROM" \
             </dev/null >"$FORGE_ROOT/ra.log" 2>&1

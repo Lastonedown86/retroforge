@@ -1,0 +1,15 @@
+[package]
+name = "forgedash"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+forgedash-core = { path = "../core" }
+sdl2 = "0.37"
+glow = "0.14"
+image = { version = "0.25", default-features = false, features = ["png"] }
+fontdue = "0.9"
+
+[features]
+default = []
+bundled = ["sdl2/bundled", "sdl2/static-link"]

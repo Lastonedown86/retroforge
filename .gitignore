@@ -5,6 +5,7 @@ dist/
 
 # Rust / Tauri
 src-tauri/target/
+forgedash/target/
 
 # Editor / OS
 .DS_Store

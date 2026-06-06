@@ -12,40 +12,111 @@
 
 ---
 
-## File Structure
+## File Structure (Cargo workspace)
+
+A two-crate workspace cleanly separates pure, host-testable logic from the
+SDL2/GLES2 layer that only builds with a C toolchain + (for the device) the
+device's own libs. This means the pure tests run anywhere — including a headless
+dev box with only rustc + the MSVC linker (no CMake / C compiler).
 
 ```
 forgedash/
-  Cargo.toml              # crate manifest + features (bundled for desktop dev)
-  .cargo/config.toml      # armv7 cross linker (added in Task 8)
-  assets/
-    font.ttf              # OFL-licensed TTF, embedded via include_bytes!
-  src/
-    main.rs               # entry: args/env, load library, run loop, draw shelf
-    model.rs              # Game, Library, library.json parsing (PURE, unit-tested)
-    ui.rs                 # Shelf nav + coverflow slot math + easing (PURE, unit-tested)
-    launch.rs             # handoff file format + write (handoff_line PURE, unit-tested)
-    platform.rs           # SDL2 window + GLES2 ctx + input + frame loop (build/run-verified)
-    gfx.rs                # GLES2 renderer: quads, textures, text (build/run-verified)
+  Cargo.toml              # [workspace] members = ["core", "app"]
+  core/                   # forgedash-core — PURE Rust, no SDL2/GL. Fully unit-tested.
+    Cargo.toml            #   deps: serde, serde_json
+    src/lib.rs            #   pub mod model; pub mod ui; pub mod launch;
+    src/model.rs          #   Game, Library, library.json parsing
+    src/ui.rs             #   Shelf nav + coverflow slot math + easing
+    src/launch.rs         #   handoff file format + write
+  app/                    # forgedash — the binary. Needs SDL2 + GL toolchain.
+    Cargo.toml            #   deps: forgedash-core (path), sdl2, glow, image, fontdue
+    .cargo/config.toml    #   armv7 cross linker (added in Task 8)
+    assets/font.ttf       #   OFL TTF, embedded via include_bytes!
+    library.json          #   dev fixture (Task 7)
+    art/placeholder.png   #   dev fixture (Task 7)
+    src/main.rs           #   entry: load library, run loop, draw shelf
+    src/platform.rs       #   SDL2 window + GLES2 ctx + input + frame loop
+    src/gfx.rs            #   GLES2 renderer: quads, textures, text
   scripts/
-    forge-loop.sh         # supervisor: run dashboard -> read handoff -> run RA -> loop
-    stage.sh              # host: tar-over-ssh staging into device tmpfs
+    forge-loop.sh         #   supervisor: run dashboard -> read handoff -> run RA -> loop
+    stage.sh              #   host: tar-over-ssh staging into device tmpfs
 docs/HARDWARE-ACCEPTANCE-FORGEDASH.md   # hardware proof runbook (Task 9)
 ```
 
-Responsibilities are split by concern: `model`/`ui`/`launch` are pure and testable; `platform`/`gfx` own all SDL/GL/device interaction; `main` wires them. Files that change together live together.
+`core` = pure logic (testable everywhere). `app` = all SDL/GL/device interaction.
+Files that change together live together.
+
+### Crate map & verification commands (applies to all later tasks)
+
+| Task | Crate / files | Verify with |
+|---|---|---|
+| 1 model, 2–3 ui, 4 launch | `core/src/*` (declared in `core/src/lib.rs`) | `cargo test -p forgedash-core <filter>` — **runs in this env** |
+| 5 platform, 6 gfx, 7 main | `app/src/*` | `cargo build -p forgedash --features bundled` then run — **needs CMake + C compiler (VS Build Tools); deferred if absent** |
+| 8 cross + scripts | `app/.cargo/`, `scripts/` | `cargo build -p forgedash --release --target armv7-unknown-linux-gnueabihf` — **needs ARM toolchain + device sysroot; deferred** |
+| 9 runbook | `docs/` | doc only |
+
+- In `app/src/main.rs`, import core via `use forgedash_core::{model, ui, launch};`
+  (crate name `forgedash-core` → path `forgedash_core`). Where later task code
+  says `mod model;` etc., that declaration lives in `core/src/lib.rs`; the app
+  uses the `use forgedash_core::...` import instead.
+- Where later tasks say a path like `forgedash/src/model.rs`, read it as
+  `forgedash/core/src/model.rs` (pure modules) or `forgedash/app/src/...`
+  (platform/gfx/main) per the table above.
+- Where later tasks say `--manifest-path forgedash/Cargo.toml`, use the
+  `-p forgedash-core` (tests) or `-p forgedash` (app) form above instead.
 
 ---
 
-## Task 0: Scaffold the crate
+## Task 0: Scaffold the workspace
 
 **Files:**
-- Create: `forgedash/Cargo.toml`
-- Create: `forgedash/src/main.rs`
+- Create: `forgedash/Cargo.toml` (workspace)
+- Create: `forgedash/core/Cargo.toml`, `forgedash/core/src/lib.rs`
+- Create: `forgedash/app/Cargo.toml`, `forgedash/app/src/main.rs`
 
-- [ ] **Step 1: Create the manifest**
+- [ ] **Step 1: Create the workspace manifest**
 
 Create `forgedash/Cargo.toml`:
+
+```toml
+[workspace]
+resolver = "2"
+members = ["core", "app"]
+```
+
+- [ ] **Step 2: Create the core crate**
+
+Create `forgedash/core/Cargo.toml`:
+
+```toml
+[package]
+name = "forgedash-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
+Create `forgedash/core/src/lib.rs`:
+
+```rust
+pub mod model;
+pub mod ui;
+pub mod launch;
+```
+
+> The three modules are added in Tasks 1–4. Until then, comment out the lines
+> for modules that don't exist yet, or create empty `model.rs`/`ui.rs`/`launch.rs`
+> stubs so the crate compiles. Simplest: create the three files empty now.
+
+Create empty `forgedash/core/src/model.rs`, `forgedash/core/src/ui.rs`,
+`forgedash/core/src/launch.rs` (Tasks 1–4 fill them).
+
+- [ ] **Step 3: Create the app crate**
+
+Create `forgedash/app/Cargo.toml`:
 
 ```toml
 [package]
@@ -54,8 +125,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+forgedash-core = { path = "../core" }
 sdl2 = "0.37"
 glow = "0.14"
 image = { version = "0.25", default-features = false, features = ["png"] }
@@ -63,15 +133,13 @@ fontdue = "0.9"
 
 [features]
 default = []
-# Desktop dev build on Windows: `cargo run --features bundled`
+# Desktop dev build (needs CMake + a C compiler): `cargo run -p forgedash --features bundled`
 # (builds SDL2 from source + ships ANGLE for a GLES2 context).
 # Device build omits this and dynamically links the device's libSDL2.
 bundled = ["sdl2/bundled", "sdl2/static-link"]
 ```
 
-- [ ] **Step 2: Create a minimal entry point**
-
-Create `forgedash/src/main.rs`:
+Create `forgedash/app/src/main.rs`:
 
 ```rust
 fn main() {
@@ -79,16 +147,20 @@ fn main() {
 }
 ```
 
-- [ ] **Step 3: Verify it builds and runs**
+- [ ] **Step 4: Verify the core crate builds (works in any env)**
 
-Run: `cargo run --features bundled --manifest-path forgedash/Cargo.toml`
-Expected: prints `ForgeDash 0.1.0` (first build compiles SDL2 from source — may take a few minutes).
+Run: `cargo build -p forgedash-core`
+Expected: compiles clean (only serde/serde_json — pure Rust, no C toolchain).
 
-- [ ] **Step 4: Commit**
+> The `app` crate is NOT built here: `sdl2` needs CMake + a C compiler. If those
+> are absent, skip building `app` until a suitably equipped box / the device.
+> Confirm with `cargo metadata --no-deps` that both crates are recognized.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add forgedash/Cargo.toml forgedash/src/main.rs
-git commit -m "feat(forgedash): scaffold launcher crate"
+git add forgedash/Cargo.toml forgedash/core forgedash/app
+git commit -m "feat(forgedash): scaffold core+app workspace"
 ```
 
 ---

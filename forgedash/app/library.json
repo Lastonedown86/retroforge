@@ -1,0 +1,6 @@
+[
+  {"title":"Super Mario Bros. 3","year":1988,"publisher":"Nintendo","players":"1-2P","cover_path":"art/placeholder.png","rom_path":"roms/smb3.nes","core":"fceumm"},
+  {"title":"The Legend of Zelda","year":1986,"publisher":"Nintendo","players":"1P","cover_path":"art/placeholder.png","rom_path":"roms/zelda.nes","core":"fceumm"},
+  {"title":"Mega Man 2","year":1988,"publisher":"Capcom","players":"1P","cover_path":"art/placeholder.png","rom_path":"roms/mm2.nes","core":"fceumm"},
+  {"title":"Contra","year":1987,"publisher":"Konami","players":"1-2P","cover_path":"art/placeholder.png","rom_path":"roms/contra.nes","core":"fceumm"}
+]
